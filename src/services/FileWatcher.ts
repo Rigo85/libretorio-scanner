@@ -29,7 +29,7 @@ export class FileWatcher {
 
 	public async startWatching() {
 		this.watcher = await nsfw(this.scanRoot.path, this.eventHandler, {
-			debounceMS: 200, // Retardo de rebote en milisegundos
+			debounceMS: 100, // Retardo de rebote en milisegundos
 			errorCallback: error => logger.error(`starWatching(${this.uuid}): ${error}.`)
 		});
 

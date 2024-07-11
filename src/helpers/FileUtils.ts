@@ -4,6 +4,7 @@ import { getEbookMeta } from "(src)/services/calibre-info";
 import { getBookInfoOpenLibrary } from "(src)/services/book-info";
 import { Logger } from "(src)/helpers/Logger";
 import fs from "fs-extra";
+import { getScanRoot } from "(src)/services/dbService";
 
 const logger = new Logger("File Utils");
 
@@ -66,7 +67,7 @@ export function travelTree(directory: string, tree: string): any {
 		trace.push(tmp);
 	}
 
-	logger.info(`dirs: "${JSON.stringify(dirs)}" - trace: "${JSON.stringify(trace)}"`);
+	// logger.info(`dirs: "${JSON.stringify(dirs)}" - trace: "${JSON.stringify(trace)}"`);
 
 	for (const dir of dirs) {
 		const tmp = dirTree.directories.find((d: Directory) => d.name === dir);
@@ -116,15 +117,14 @@ export function getHashes(tree: Directory) {
 	return hashes;
 }
 
-async function pathExists(path: string): Promise<boolean> {
-	try {
-		await fs.access(path);
-		return true;
-	} catch (error) {
-		if (error.code === "ENOENT") {
-			return false;
-		} else {
-			throw error;
-		}
+export async function existDirectory(directory: string, file: string, scanRootId: number): Promise<boolean> {
+	const scanRoot = await getScanRoot(scanRootId);
+	if (scanRoot) {
+		const {guardTree, dirTree, trace} = travelTree(directory, scanRoot.directories);
+		const dir = dirTree.directories.find((d: Directory) => d.name === file);
+
+		return !!dir;
 	}
+
+	return false;
 }

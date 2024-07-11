@@ -1,10 +1,10 @@
 import nsfw, { ActionType, FileChangeEvent } from "nsfw";
 import path from "path";
-import fs, { pathExists } from "fs-extra";
+import fs from "fs-extra";
 
 import { Logger } from "(src)/helpers/Logger";
 import {
-	Directory,
+	Directory, existDirectory,
 	File,
 	fillFileDetails,
 	generateHash,
@@ -20,12 +20,14 @@ import {
 	updateFileOnDirectoryRenamed,
 	updateScanRoot
 } from "(src)/services/dbService";
+import { RedisQueue } from "(src)/services/RedisQueue";
 
 const logger = new Logger("File Watcher Consumer");
 
 interface ProcessEvent {
 	fileChangeEvent: FileChangeEvent;
 	scanRootId: number;
+	count?: number;
 }
 
 function actionTypeToString(actionType: ActionType) {
@@ -41,6 +43,10 @@ function actionTypeToString(actionType: ActionType) {
 			return "RENAMED";
 	}
 	/* eslint-enable @typescript-eslint/indent */
+}
+
+function getQueue() {
+	return RedisQueue.getInstance(() => Promise.resolve());
 }
 
 export async function fileWatcherConsumer(event: ProcessEvent) {
@@ -76,15 +82,15 @@ export async function fileWatcherConsumer(event: ProcessEvent) {
 			break;
 		case nsfw.actions.DELETED:
 			try {
-				/**
-				 * En este punto ya el archivo o directorio no existe en el sistema de archivos.
-				 */
-				logger.info(`-----------------------> Deleted: ${path.join(event.fileChangeEvent.directory, event.fileChangeEvent.file)}`);
-				// if (!pathExists(fullPath)) {
-				//
-				// }
-				//
-				await processDeletion(event);
+				if (event.count === 1) {
+					await getQueue().addToQueue(event.fileChangeEvent, event.scanRootId, event.count);
+				} else {
+					const fileFromDb = await getFileFromDb(generateHash(event.fileChangeEvent.directory), event.fileChangeEvent.directory, event.fileChangeEvent.file);
+					const isDirectory = await existDirectory(event.fileChangeEvent.directory, event.fileChangeEvent.file, event.scanRootId);
+					if (fileFromDb || isDirectory) {
+						await processDeletion(event);
+					}
+				}
 			} catch (error) {
 				logger.error(`Error processing item(${actionTypeToString(event.fileChangeEvent.action)}):`, error.message);
 			}

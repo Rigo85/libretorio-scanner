@@ -1,6 +1,6 @@
 import { createClient, RedisClientType } from "redis";
 import { Logger } from "(src)/helpers/Logger";
-import { FileChangeEvent } from "nsfw";
+import { ActionType, FileChangeEvent } from "nsfw";
 
 const logger = new Logger("Redis Queue");
 
@@ -39,8 +39,14 @@ export class RedisQueue {
 		return RedisQueue.instance;
 	}
 
-	public async addToQueue(fileChangeEvent: FileChangeEvent, scanRootId: number): Promise<void> {
-		await this.redisClient.lPush(this.queueName, JSON.stringify({fileChangeEvent, scanRootId}));
+	public async addToQueue(fileChangeEvent: FileChangeEvent, scanRootId: number, count: number = 0): Promise<void> {
+		await this.redisClient.lPush(
+			this.queueName,
+			JSON.stringify({
+				fileChangeEvent,
+				scanRootId,
+				count: fileChangeEvent.action === ActionType.DELETED ? count + 1 : 0
+			}));
 	}
 
 	private async startProcessing(): Promise<void> {
