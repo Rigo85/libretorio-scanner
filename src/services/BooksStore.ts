@@ -1,10 +1,11 @@
 import { Logger } from "(src)/helpers/Logger";
 import { getScanRoots, insertFile, insertScanRoot } from "(src)/services/dbService";
-import { File, Scanner, ScanRootResult } from "(src)/services/Scanner";
-import { getEbookMeta } from "(src)/services/calibre-info";
-import { getBookInfoGoogleBooks, getBookInfoOpenLibrary } from "(src)/services/book-info";
+import { Scanner, ScanRootResult } from "(src)/services/Scanner";
 import path from "path";
 import { FileWatcher } from "(src)/services/FileWatcher";
+import { RedisQueue } from "(src)/services/RedisQueue";
+import { fileWatcherConsumer } from "(src)/services/FileWatcherConsumer";
+import { fillFileDetails, removeTrailingSeparator } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Books Store");
 
@@ -30,7 +31,7 @@ export class BooksStore {
 
 	private async startBooksInfo(): Promise<number> {
 		try {
-			const scanRootResult = await Scanner.getInstance().scan(envScanRoot);
+			const scanRootResult = await Scanner.getInstance().scan(removeTrailingSeparator(envScanRoot));
 
 			return await this.updateBooksDetailsInfo(scanRootResult);
 		} catch (error) {
@@ -55,21 +56,8 @@ export class BooksStore {
 			logger.info(`Updating book details info ${count++}/${scanRootResult.scan.files.length}: "${path.join(file.parentPath, file.name)}"`);
 
 			try {
-				const meta = await getEbookMeta(path.join(file.parentPath, file.name));
-
-				if (meta) {
-					meta.title = (meta.title || "").trim();
-					file.localDetails = JSON.stringify(meta);
-					if (meta.title && meta.title.trim()) {
-						// const bookInfo = await getBookInfoGoogleBooks(meta.title);
-						const bookInfo = await getBookInfoOpenLibrary(meta.title);
-						if (bookInfo) {
-							file.webDetails = JSON.stringify(bookInfo);
-						}
-					}
-				}
-
-				await insertFile(file, scanRootId);
+				const _file = await fillFileDetails(file);
+				await insertFile(_file, scanRootId);
 			} catch (error) {
 				logger.error(`updateBooksDetailsInfo "${path.join(file.parentPath, file.name)}":`, error);
 
@@ -97,18 +85,16 @@ export class BooksStore {
 			return;
 		}
 
+		RedisQueue.getInstance(fileWatcherConsumer);
+
 		for (const dbScanRoot of dbScanRoots) {
-			const fileWatcher = new FileWatcher(dbScanRoot.path);
+			const fileWatcher = new FileWatcher(dbScanRoot);
 
 			try {
 				await fileWatcher.startWatching();
 			} catch (error) {
 				logger.error("updateBooksInfo:", error);
 			}
-			// new FileWatcher(dbScanRoot.path).startWatching()
-			// 	.catch(error => {
-			// 		logger.error("updateBooksInfo:", error);
-			// 	});
 		}
 
 		logger.info("Done updating books info");

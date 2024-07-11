@@ -1,24 +1,10 @@
 import fs from "fs";
-import crypto from "crypto";
 import path from "path";
 
 import { Logger } from "(src)/helpers/Logger";
+import { generateHash, File, Directory } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Scanner");
-
-export interface Directory {
-	name: string;
-	hash: string;
-	directories: Directory[];
-}
-
-export interface File {
-	name: string;
-	parentPath: string;
-	parentHash: string;
-	localDetails?: string;
-	webDetails?: string;
-}
 
 export interface ScanResult {
 	directories: Directory;
@@ -67,14 +53,10 @@ export class Scanner {
 		return result;
 	}
 
-	private generateHash(data: string): string {
-		return crypto.createHash("sha256").update(data).digest("hex").slice(0, 16);
-	};
-
 	private async getStructureAndFiles(dirPath: string): Promise<ScanResult> {
 		const structure: Directory = {
 			name: path.basename(dirPath),
-			hash: this.generateHash(dirPath),
+			hash: generateHash(dirPath),
 			directories: [] as Directory[]
 		};
 
@@ -94,7 +76,7 @@ export class Scanner {
 				filesList.push({
 					name: item,
 					parentPath: dirPath,
-					parentHash: this.generateHash(dirPath)
+					parentHash: generateHash(dirPath)
 				});
 			}
 		}
