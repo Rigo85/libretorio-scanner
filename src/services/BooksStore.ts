@@ -1,10 +1,9 @@
-import { Logger } from "(src)/helpers/Logger";
-import { getScanRoots, insertFile, insertScanRoot } from "(src)/services/dbService";
-import { Scanner, ScanRootResult } from "(src)/services/Scanner";
 import path from "path";
+
+import { Logger } from "(src)/helpers/Logger";
+import { getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(src)/services/dbService";
+import { Scanner, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
-import { RedisQueue } from "(src)/services/RedisQueue";
-import { fileWatcherConsumer } from "(src)/services/FileWatcherConsumer";
 import { fillFileDetails, removeTrailingSeparator } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Books Store");
@@ -29,7 +28,7 @@ export class BooksStore {
 		return BooksStore.instance;
 	}
 
-	private async startBooksInfo(): Promise<number> {
+	private async startBooksInfo(): Promise<ScanRoot> {
 		try {
 			const scanRootResult = await Scanner.getInstance().scan(removeTrailingSeparator(envScanRoot));
 
@@ -41,13 +40,14 @@ export class BooksStore {
 		}
 	}
 
-	private async updateBooksDetailsInfo(scanRootResult: ScanRootResult): Promise<number> {
+	private async updateBooksDetailsInfo(scanRootResult: ScanRootResult): Promise<ScanRoot> {
 		logger.info(`Updating books details info for "${scanRootResult.root}"`);
 
-		const scanRootId = await insertScanRoot(scanRootResult);
+		const scanRoot = await insertScanRoot(scanRootResult);
 
-		if (!scanRootId) {
+		if (!scanRoot) {
 			logger.error(`Error inserting scan root for "${scanRootResult.root}"`);
+
 			return undefined;
 		}
 
@@ -57,7 +57,7 @@ export class BooksStore {
 
 			try {
 				const _file = await fillFileDetails(file);
-				await insertFile(_file, scanRootId);
+				await insertFile(_file, scanRoot.id);
 			} catch (error) {
 				logger.error(`updateBooksDetailsInfo "${path.join(file.parentPath, file.name)}":`, error);
 
@@ -65,27 +65,24 @@ export class BooksStore {
 			}
 		}
 
-		return scanRootId;
+		return scanRoot;
 	}
 
 	public async updateBooksInfo() {
 		logger.info("Updating books info");
 
 		let dbScanRoots = await getScanRoots();
-		if (dbScanRoots.length === 0) {
-			const id = await this.startBooksInfo();
-			if (!id) {
+
+		if (!dbScanRoots.length) {
+			const scanRoot = await this.startBooksInfo();
+			if (!scanRoot) {
 				logger.error(`Error starting books info for "${envScanRoot}"`);
+
+				return;
 			}
-		}
 
-		dbScanRoots = await getScanRoots();
-		if (dbScanRoots.length === 0) {
-			logger.error("No scan roots found.");
-			return;
+			dbScanRoots = [scanRoot];
 		}
-
-		RedisQueue.getInstance(fileWatcherConsumer);
 
 		for (const dbScanRoot of dbScanRoots) {
 			const fileWatcher = new FileWatcher(dbScanRoot);

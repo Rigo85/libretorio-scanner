@@ -1,46 +1,55 @@
-import nsfw, { ActionType, FileChangeEvent, NSFW } from "nsfw";
 import { v4 as uuidv4 } from "uuid";
+import chokidar, { FSWatcher } from "chokidar";
+
 import { Logger } from "(src)/helpers/Logger";
-import { RedisQueue } from "(src)/services/RedisQueue";
 import { ScanRoot } from "(src)/services/dbService";
+import { RedisQueue } from "(src)/services/RedisQueue";
+import { scanCompareUpdate } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("File Watcher");
 
+const eventDelay = parseInt(process.env.EVENT_DELAY || "1000");
+
 export class FileWatcher {
-	private watcher: NSFW;
+	private watcher: FSWatcher;
 	private readonly uuid: string;
-	private redisQueue: RedisQueue;
-	private processFunction = () => Promise.resolve();
+	private eventTimeout: NodeJS.Timeout;
+	private queue: RedisQueue;
+	// eslint-disable-next-line @typescript-eslint/naming-convention
+	private readonly EVENT_DELAY = eventDelay;
 
 	constructor(private scanRoot: ScanRoot) {
 		this.uuid = uuidv4();
-		this.eventHandler = this.eventHandler.bind(this);
-		this.redisQueue = RedisQueue.getInstance(this.processFunction);
-		logger.info(`FileWatcher "${this.uuid}" created`);
+
+		this.handleEventsEnd = this.handleEventsEnd.bind(this);
+		this.startWatching = this.startWatching.bind(this);
+		this.queue = RedisQueue.getInstance(scanCompareUpdate);
+
+		this.watcher = chokidar.watch(this.scanRoot.path, {
+			persistent: true,
+			ignoreInitial: true
+		});
+		logger.info(`FileWatcher "${this.uuid}" created.`);
 	}
 
-	private async eventHandler(events: FileChangeEvent[]) {
-		for (const event of events) {
-			if ([ActionType.CREATED, ActionType.DELETED, ActionType.RENAMED].includes(event.action)) {
-				await this.redisQueue.addToQueue(event, this.scanRoot.id);
-			}
-		}
-	};
+	private handleEventsEnd() {
+		this.queue.addToQueue(this.scanRoot.path).catch(error => logger.error("Error adding to queue:", error));
+	}
 
 	public async startWatching() {
-		this.watcher = await nsfw(this.scanRoot.path, this.eventHandler, {
-			debounceMS: 100, // Retardo de rebote en milisegundos
-			errorCallback: error => logger.error(`starWatching(${this.uuid}): ${error}.`)
-		});
+		this.watcher
+			.on("all", (event: "add" | "addDir" | "change" | "unlink" | "unlinkDir", path: string) => {
+				if (event !== "change") {
+					logger.info(`"${event}" detected on "${path}".`);
 
-		await this.watcher.start();
-		logger.info(`FileWatcher(${this.uuid}) monitoring changes in ${this.scanRoot.path}.`);
-	}
+					if (this.eventTimeout) {
+						clearTimeout(this.eventTimeout);
+					}
 
-	public async stopWatching() {
-		if (this.watcher) {
-			await this.watcher.stop();
-			logger.info(`FileWatcher(${this.uuid}) monitoring stopped.`);
-		}
+					this.eventTimeout = setTimeout(this.handleEventsEnd, this.EVENT_DELAY);
+				}
+			})
+			.on("ready", () => logger.info(`FileWatcher(${this.uuid}) is ready monitoring changes in "${this.scanRoot.path}".`))
+			.on("error", error => logger.error(`Watcher error: ${error}.`));
 	}
 }

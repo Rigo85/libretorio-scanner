@@ -1,10 +1,16 @@
 import crypto from "crypto";
 import path from "path";
+
 import { getEbookMeta } from "(src)/services/calibre-info";
 import { getBookInfoOpenLibrary } from "(src)/services/book-info";
 import { Logger } from "(src)/helpers/Logger";
-import fs from "fs-extra";
-import { getScanRoot } from "(src)/services/dbService";
+import {
+	getFileHashes,
+	getScanRootByPath,
+	insertFile,
+	removeFile, updateScanRoot
+} from "(src)/services/dbService";
+import { Scanner } from "(src)/services/Scanner";
 
 const logger = new Logger("File Utils");
 
@@ -22,8 +28,61 @@ export interface Directory {
 	directories: Directory[];
 }
 
-export function generateHash(data: string): string {
-	return crypto.createHash("sha256").update(data).digest("hex").slice(0, 16);
+export async function scanCompareUpdate(scanRootPath: string) {
+	logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
+
+	try {
+		const scanRoot = await getScanRootByPath(scanRootPath);
+
+		if (!scanRoot) {
+			logger.error("No scan roots found.");
+
+			return;
+		}
+
+		// - escanear el directorio observado.
+		const scanRootResult = await Scanner.getInstance().scan(removeTrailingSeparator(scanRootPath));
+
+		// - obtener los hashes de los directorios.
+		const hash = getHashes(scanRootResult.scan.directories);
+
+		// - eliminar los archivos en la db que NO tengan un parentHash dentro de los hashes obtenidos.
+		const removedFilesCount = await removeFile(hash);
+		logger.info(`Removed files: ${removedFilesCount}.`);
+
+		// - obtener los archivos de la db.
+		const hashes = await getFileHashes(scanRoot.id);
+
+		// - los archivos del scan que no estén en la db, se insertan.
+		const newFiles = scanRootResult.scan.files.filter((file: File) => {
+			return !hashes.find((h: { hash: string }) => {
+				return h.hash === generateHash(path.join(file.parentPath, file.name), true);
+			});
+		});
+
+		logger.info(`New files: ${newFiles.length}.`);
+
+		for (const file of newFiles) {
+			const _file = await fillFileDetails(file);
+			await insertFile(_file, scanRoot.id);
+		}
+
+		await updateScanRoot(JSON.stringify(scanRootResult.scan.directories), scanRoot.id);
+	} catch (error) {
+		logger.error(`scanCompareUpdate "${scanRootPath}":`, error.message);
+	}
+}
+
+export function generateHash(data: string, full?: boolean): string {
+	let hash: string;
+
+	if (full) {
+		hash = crypto.createHash("sha256").update(data).digest("hex");
+	} else {
+		hash = crypto.createHash("sha256").update(data).digest("hex").slice(0, 16);
+	}
+
+	return hash;
 }
 
 export async function fillFileDetails(file: File): Promise<File> {
@@ -55,53 +114,6 @@ export function removeTrailingSeparator(uri: string): string {
 	return uri;
 }
 
-export function travelTree(directory: string, tree: string): any {
-	const dirs = directory.split(path.sep).filter((dir: string) => dir);
-	let dirTree = JSON.parse(tree) as Directory;
-	const guardTree = dirTree;
-	const trace = [] as string[];
-
-	let tmp: string = "";
-	while (dirTree.name !== tmp) {
-		tmp = dirs.shift() as string;
-		trace.push(tmp);
-	}
-
-	// logger.info(`dirs: "${JSON.stringify(dirs)}" - trace: "${JSON.stringify(trace)}"`);
-
-	for (const dir of dirs) {
-		const tmp = dirTree.directories.find((d: Directory) => d.name === dir);
-		if (!tmp) {
-			throw new Error(`Directory not found: "${dir}" on "${trace.join(path.sep)}"`);
-		}
-		dirTree = tmp;
-	}
-
-	return {guardTree, dirTree, trace};
-}
-
-export function updateTree(tree: Directory, directory: string, newFile: string): string[] {
-	const oldHashes = [] as string[];
-
-	oldHashes.push(tree.hash);
-	tree.hash = generateHash(path.join(directory, newFile));
-	tree.name = newFile;
-
-	function updateDir(tree: Directory, newPath: string, oldHashes: string[]) {
-		oldHashes.push(tree.hash);
-		tree.hash = generateHash(path.join(newPath, tree.name));
-		for (const dir of tree.directories) {
-			updateDir(dir, path.join(newPath, tree.name), oldHashes);
-		}
-	}
-
-	for (const dir of tree.directories) {
-		updateDir(dir, path.join(directory, newFile), oldHashes);
-	}
-
-	return oldHashes;
-}
-
 export function getHashes(tree: Directory) {
 	const hashes = [] as string[];
 
@@ -115,16 +127,4 @@ export function getHashes(tree: Directory) {
 	getDirHashes(tree);
 
 	return hashes;
-}
-
-export async function existDirectory(directory: string, file: string, scanRootId: number): Promise<boolean> {
-	const scanRoot = await getScanRoot(scanRootId);
-	if (scanRoot) {
-		const {guardTree, dirTree, trace} = travelTree(directory, scanRoot.directories);
-		const dir = dirTree.directories.find((d: Directory) => d.name === file);
-
-		return !!dir;
-	}
-
-	return false;
 }
