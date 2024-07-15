@@ -1,10 +1,10 @@
 import path from "path";
 
 import { Logger } from "(src)/helpers/Logger";
-import { getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(src)/services/dbService";
-import { Scanner, ScanRootResult } from "(src)/services/Scanner";
+import { getFiles, getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(src)/services/dbService";
+import { Scanner, ScanResult, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
-import { fillFileDetails, removeTrailingSeparator } from "(src)/helpers/FileUtils";
+import { Directory, fillFileDetails, removeTrailingSeparator, File } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Books Store");
 
@@ -95,6 +95,28 @@ export class BooksStore {
 		}
 
 		logger.info("Done updating books info");
+	}
+
+	public async getBooksList(parentHash?: string): Promise<ScanResult> {
+		logger.info("getBooksList:", parentHash ?? "root");
+
+		try {
+			const scanRoots = await getScanRoots();
+
+			if (!scanRoots?.length) {
+				logger.error("getBooksList", "No scan roots found");
+				return undefined;
+			}
+
+			const directories = JSON.parse(scanRoots[0].directories) as Directory;
+			const files = await getFiles(parentHash ?? directories.hash);
+
+			return {directories, files};
+		} catch (error) {
+			logger.error("getBooksList", error);
+
+			return undefined;
+		}
 	}
 
 	// actualizar metadata manualmente.

@@ -15,6 +15,7 @@ import { Scanner } from "(src)/services/Scanner";
 const logger = new Logger("File Utils");
 
 export interface File {
+	id?: number;
 	name: string;
 	parentPath: string;
 	parentHash: string;

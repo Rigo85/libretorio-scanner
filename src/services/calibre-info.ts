@@ -23,6 +23,9 @@ export async function getEbookMeta(filePath: string): Promise<any> {
 			return undefined;
 		}
 
+		// ebook-meta example.epub --get-cover output_cover.jpg
+		// LANG=en_US.UTF-8 ebook-meta example.epub
+
 		const {
 			stdout,
 			stderr

@@ -308,7 +308,7 @@ export async function removeFile(hashes: string[]): Promise<number> {
 	}
 }
 
-export async function getFileHashes(scanRootId: number): Promise<{hash: string}[]> {
+export async function getFileHashes(scanRootId: number): Promise<{ hash: string }[]> {
 	logger.info(`getFileHashes for scan root: "${scanRootId}".`);
 
 	try {
@@ -330,6 +330,22 @@ export async function getFileHashes(scanRootId: number): Promise<{hash: string}[
 		return hashes || [];
 	} catch (error) {
 		logger.error(`getFileHashes "${scanRootId}":`, error.message);
+
+		return [];
+	}
+}
+
+export async function getFiles(parentHash: string): Promise<File[]> {
+	try {
+		const query = `
+		SELECT * FROM archive a WHERE a."parentHash" = $1
+		`;
+		const values = [parentHash];
+		const rows = await executeQuery(query, values);
+
+		return rows || [];
+	} catch (error) {
+		logger.error("getFiles", error.message);
 
 		return [];
 	}
