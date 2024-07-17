@@ -39,6 +39,7 @@
         "module-alias": "^2.2.3",
         "pg": "^8.11.3",
         "redis": "^4.6.15",
+        "string-similarity": "^4.0.4",
         "uuid": "^10.0.0",
         "ws": "^8.15.1"
     },
@@ -51,6 +52,7 @@
         "@types/node": "^20.8.5",
         "@types/pg": "^8.10.9",
         "@types/shelljs": "^0.8.15",
+        "@types/string-similarity": "^4.0.2",
         "@types/uuid": "^10.0.0",
         "@types/ws": "^8.5.10",
         "@typescript-eslint/eslint-plugin": "^6.7.5",

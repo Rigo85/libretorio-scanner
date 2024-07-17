@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import path from "path";
+import stringSimilarity from "string-similarity";
 
 import { getEbookMeta } from "(src)/services/calibre-info";
 import { getBookInfoOpenLibrary } from "(src)/services/book-info";
@@ -19,6 +20,8 @@ export interface File {
 	name: string;
 	parentPath: string;
 	parentHash: string;
+	size: string;
+	coverId: string;
 	localDetails?: string;
 	webDetails?: string;
 }
@@ -88,19 +91,25 @@ export function generateHash(data: string, full?: boolean): string {
 
 export async function fillFileDetails(file: File): Promise<File> {
 	try {
-		const meta = await getEbookMeta(path.join(file.parentPath, file.name));
+		const meta = await getEbookMeta(path.join(file.parentPath, file.name), file.coverId);
 
+		const filename = cleanFilename(file.name);
+		let _title = "";
 		if (meta) {
 			meta.title = (meta.title || "").trim();
 			file.localDetails = JSON.stringify(meta);
 			if (meta.title) {
-				// const bookInfo = await getBookInfoGoogleBooks(meta.title);
-				const bookInfo = await getBookInfoOpenLibrary(meta.title);
-				if (bookInfo) {
-					file.webDetails = JSON.stringify(bookInfo);
-				}
+				_title = cleanTitle(meta.title);
 			}
 		}
+
+		const similarity = stringSimilarity.compareTwoStrings(filename, _title);
+
+		const bookInfo = await getBookInfoOpenLibrary(similarity >= 0.5 ? _title : filename);
+		if (bookInfo) {
+			file.webDetails = JSON.stringify(bookInfo);
+		}
+
 	} catch (error) {
 		console.error(`fillFileDetails "${path.join(file.parentPath, file.name)}":`, error.message);
 	}
@@ -128,4 +137,40 @@ export function getHashes(tree: Directory) {
 	getDirHashes(tree);
 
 	return hashes;
+}
+
+export function humanFileSize(bytes: number, si: boolean = false, dp: number = 1): string {
+	const thresh = si ? 1000 : 1024;
+
+	if (Math.abs(bytes) < thresh) {
+		return bytes + " B";
+	}
+
+	const units = si
+		? ["kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+		: ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
+	let u = -1;
+	const r = 10 ** dp;
+
+	do {
+		bytes /= thresh;
+		++u;
+	} while (Math.round(Math.abs(bytes) * r) / r >= thresh && u < units.length - 1);
+
+	return `${bytes.toFixed(dp)} ${units[u]}`;
+}
+
+function cleanFilename(filename: string): string {
+	return filename
+		.replace(/\.[^/.]+$/, "")
+		.replace(/[^a-zA-ZñÑáéíóúÁÉÍÓÚ0-9 ]/g, " ")
+		.replace(/\s+/g, " ")
+		.toLowerCase();
+}
+
+function cleanTitle(title: string): string {
+	return title
+		.replace(/[^a-zA-ZñÑáéíóúÁÉÍÓÚ0-9 ]/g, " ")
+		.replace(/\s+/g, " ")
+		.toLowerCase();
 }

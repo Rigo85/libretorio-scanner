@@ -158,11 +158,11 @@ export async function insertFile(file: File, scanRootId: number): Promise<number
 
 	try {
 		const query = `
-			INSERT INTO archive (name, "parentPath", "parentHash", "localDetails", "webDetails", scan_root_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO archive (name, "parentPath", "parentHash", "localDetails", "webDetails", "size", "coverId", scan_root_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
         `;
-		const values = [file.name, file.parentPath, file.parentHash, file.localDetails, file.webDetails, scanRootId];
+		const values = [file.name, file.parentPath, file.parentHash, file.localDetails, file.webDetails, file.size, file.coverId, scanRootId];
 
 		const fileIds = await executeQuery(query, values);
 

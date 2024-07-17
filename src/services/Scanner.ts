@@ -1,8 +1,9 @@
 import fs from "fs";
 import path from "path";
+import { v4 as uuidv4 } from "uuid";
 
 import { Logger } from "(src)/helpers/Logger";
-import { generateHash, File, Directory } from "(src)/helpers/FileUtils";
+import { generateHash, File, Directory, humanFileSize } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Scanner");
 
@@ -76,7 +77,9 @@ export class Scanner {
 				filesList.push({
 					name: item,
 					parentPath: dirPath,
-					parentHash: generateHash(dirPath)
+					parentHash: generateHash(dirPath),
+					size: humanFileSize(stats.size, true),
+					coverId: uuidv4()
 				});
 			}
 		}

@@ -14,7 +14,7 @@ function checkIfPathExistsAndIsFile(filePath: string): boolean {
 	return false;
 }
 
-export async function getEbookMeta(filePath: string): Promise<any> {
+export async function getEbookMeta(filePath: string, coverId: string): Promise<any> {
 	// logger.info(`getEbookMeta: "${filePath}"`);
 
 	try {
@@ -23,13 +23,13 @@ export async function getEbookMeta(filePath: string): Promise<any> {
 			return undefined;
 		}
 
-		// ebook-meta example.epub --get-cover output_cover.jpg
-		// LANG=en_US.UTF-8 ebook-meta example.epub
+		const calibrePath = path.join(__dirname, "calibre", "ebook-meta");
+		const coverPath = path.join(__dirname, "..", "public", "covers", `${coverId}.jpg`);
 
 		const {
 			stdout,
 			stderr
-		} = await execPromise(`${path.join(__dirname, "calibre", "ebook-meta")} "${filePath}"`);
+		} = await execPromise(`${calibrePath} "${filePath}" --get-cover ${coverPath}`);
 		if (stderr) {
 			logger.error(`getEbookMeta: ${stderr}`);
 			return undefined;
