@@ -24,6 +24,7 @@ export interface File {
 	coverId: string;
 	localDetails?: string;
 	webDetails?: string;
+	customDetails?: boolean;
 }
 
 export interface Directory {

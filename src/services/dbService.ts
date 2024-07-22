@@ -34,7 +34,7 @@ async function executeQuery(query: string, values: any[]): Promise<any> {
 
 		return rows;
 	} catch (error) {
-		logger.error("executeQuery", error);
+		logger.error("executeQuery", {query, values, error});
 
 		return undefined;
 	}
@@ -182,111 +182,31 @@ export async function insertFile(file: File, scanRootId: number): Promise<number
 	}
 }
 
-// export async function updateFile(parentHash: string, oldFileName: string, newFileName: string): Promise<number> {
-// 	logger.info(`updateFile: "${oldFileName}" -> "${newFileName}" for parent hash: "${parentHash}".`);
-//
-// 	try {
-// 		const query = `
-// 			UPDATE archive SET name = $1 WHERE "parentHash" = $2 AND name = $3
-// 			RETURNING id
-//         `;
-// 		const values = [newFileName, parentHash, oldFileName];
-//
-// 		const fileIds = await executeQuery(query, values);
-//
-// 		if (!fileIds || fileIds.length === 0) {
-// 			logger.error(`Error updating file: "${oldFileName}" -> "${newFileName}" for parent hash: "${parentHash}".`);
-//
-// 			return undefined;
-// 		}
-//
-// 		// logger.info(`Updated file "${oldFileName}" -> "${newFileName}" with id: "${fileId}" for parent hash: "${parentHash}"`);
-//
-// 		return fileIds[0].id;
-// 	} catch (error) {
-// 		logger.error(`updateFile "${oldFileName}":`, error.message);
-//
-// 		return undefined;
-// 	}
-// }
-//
-// export async function getFileFromDb(parentHash: string, parentPath: string, name: string): Promise<number> {
-// 	logger.info(`getFileFromDb: "${name}" for parent hash: "${parentHash}" and parentPath: "${parentPath}".`);
-//
-// 	try {
-// 		const query = `
-// 			SELECT id FROM archive WHERE "parentHash" = $1 AND "parentPath" = $2 AND name = $3
-// 		`;
-// 		const values = [parentHash, parentPath, name];
-//
-// 		const files = await executeQuery(query, values);
-//
-// 		return files && files.length ? files[0] : undefined;
-// 	} catch (error) {
-// 		logger.error(`getFileFromDb "${name}":`, error.message);
-//
-// 		return undefined;
-// 	}
-// }
-//
-// export async function updateFileOnDirectoryRenamed(oldHashes: string[], oldFile: string, newFile: string): Promise<number> {
-// 	logger.info(`updateFileOnDirectoryRenamed: old hashes length="${oldHashes.length}" old file="${oldFile}" new file="${newFile}".`);
-//
-// 	try {
-// 		const query = `
-// 		UPDATE archive
-// 		SET
-// 			"parentPath" = replace("parentPath", $2, $3),
-// 			"parentHash" =  substring(encode(digest(replace("parentPath", $2, $3), 'sha256'), 'hex') from 1 for 16)
-// 		WHERE
-// 			"parentHash" = ANY($1)
-// 		RETURNING id;
-// 		`;
-// 		const values = [oldHashes, oldFile, newFile];
-//
-// 		const files = await executeQuery(query, values);
-//
-// 		if (files) {
-// 			logger.info(`Updated ${files.length} files: for directory rename: "${oldFile}" -> "${newFile}".`);
-// 		}
-//
-// 		return (files || []).length;
-// 	} catch (error) {
-// 		logger.error(`updateFileOnDirectoryRenamed "${oldFile}":`, error.message);
-//
-// 		return undefined;
-// 	}
-// }
-// export async function removeFile(hashes: string[], file?: string): Promise<number> {
-// 	logger.info(`removeFile: parent hashes length="${hashes.length}" ${file ? `file=${file}` : ""}.`);
-//
-// 	try {
-// 		let query: string;
-// 		let values: any[];
-//
-// 		if (file) {
-// 			query = `
-// 			DELETE FROM archive a WHERE a."parentHash" = ANY($1) and a.name = $2
-// 			RETURNING a.id;
-// 			`;
-// 			values = [hashes, file];
-// 		} else {
-// 			query = `
-// 			DELETE FROM archive a WHERE a."parentHash" = ANY($1)
-// 			RETURNING a.id;
-// 			`;
-// 			values = [hashes];
-// 		}
-//
-// 		const removesFileIds = await executeQuery(query, values);
-//
-// 		return (removesFileIds || []).length;
-// 	} catch (error) {
-// 		logger.error(`removeFile parent hashes length="${hashes.length}" ${file ? `file=${file}` : ""}:`, error.message);
-//
-// 		return undefined;
-// 	}
-// }
+export async function updateFile(file: File): Promise<boolean> {
+	logger.info(`updateFile: "${file.name}"`);
+
+	try {
+		const query = `
+			UPDATE archive SET "webDetails" = $1, "customDetails" = $2
+			WHERE id = $3
+			RETURNING id
+		`;
+		const values = [file.webDetails, file.customDetails ?? false, file.id];
+		const rows = await executeQuery(query, values);
+
+		if (!rows?.length) {
+			logger.error(`Error updating file: "${file.name}".`);
+
+			return false;
+		}
+
+		return true;
+	} catch (error) {
+		logger.error(`updateFile "${file.name}":`, error.message);
+
+		return false;
+	}
+}
 
 export async function removeFile(hashes: string[]): Promise<number> {
 	logger.info(`removeFile: parent hashes length="${hashes.length}".`);

@@ -20,6 +20,12 @@ export function onMessageEvent(message: any, ws: WebSocket) {
 		"ls": async () => {
 			await onListEvent(ws, messageObj);
 		},
+		"search": async () => {
+			await onSearchEvent(ws, messageObj);
+		},
+		"update": async () => {
+			await onUpdateEvent(ws, messageObj);
+		},
 		"default": async () => {
 			ws.send("{\"event\":\"errors\", \"data\": {\"errors\":[\"An error has occurred. Invalid event kind.\"]}}");
 		}
@@ -38,6 +44,24 @@ async function onListEvent(ws: WebSocket, messageObj: { event: string; data: any
 		sendMessage(ws, {event: "list", data: scanResult});
 	} catch (error) {
 		logger.error("onListEvent", error);
+	}
+}
+
+async function onSearchEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
+	try {
+		const bookInfo = await BooksStore.getInstance().searchBookInfoOpenLibrary(messageObj.data);
+		sendMessage(ws, {event: "search_details", data: bookInfo});
+	} catch (error) {
+		logger.error("onSearchEvent", error);
+	}
+}
+
+async function onUpdateEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
+	try {
+		const response = await BooksStore.getInstance().updateBooksDetails(messageObj.data);
+		sendMessage(ws, {event: "update", data: {response}});
+	} catch (error) {
+		logger.error("onUpdateEvent", error);
 	}
 }
 

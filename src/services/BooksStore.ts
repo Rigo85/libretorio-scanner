@@ -5,6 +5,8 @@ import { getFiles, getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(s
 import { Scanner, ScanResult, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
 import { Directory, fillFileDetails, removeTrailingSeparator, File } from "(src)/helpers/FileUtils";
+import { searchBookInfoOpenLibrary } from "(src)/services/book-info";
+import { updateFile } from "(src)/services/dbService";
 
 const logger = new Logger("Books Store");
 
@@ -119,10 +121,33 @@ export class BooksStore {
 		}
 	}
 
+	public async searchBookInfoOpenLibrary(searchOptions: { title: string; author: string }): Promise<any[]> {
+		logger.info("searchBookInfoOpenLibrary:", searchOptions);
+
+		try {
+			return searchBookInfoOpenLibrary(searchOptions.title, searchOptions.author);
+		} catch (error) {
+			logger.error("searchBookInfoOpenLibrary", error);
+
+			return [];
+		}
+	}
+
 	// actualizar metadata manualmente.
 
 	// leer
 
 	// descargar
 
+	public async updateBooksDetails(file: File): Promise<boolean> {
+		logger.info("updateBooksDetails:", {id: file.id, name: file.name});
+
+		try {
+			return updateFile(file);
+		} catch (error) {
+			logger.error("updateBooksDetails", error);
+
+			return false;
+		}
+	}
 }
