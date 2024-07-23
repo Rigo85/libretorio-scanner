@@ -270,3 +270,24 @@ export async function getFiles(parentHash: string): Promise<File[]> {
 		return [];
 	}
 }
+
+export async function getFilesByText(searchText: string): Promise<File[]> {
+	try {
+		const query = `
+			SELECT * 
+			FROM archive 
+			WHERE 
+				name ILIKE '%' || $1 || '%' 
+				OR ("localDetails" IS NOT NULL AND "localDetails"::text ILIKE '%' || $1 || '%')
+				OR ("webDetails" IS NOT NULL AND "webDetails"::text ILIKE '%' || $1 || '%');
+		`;
+		const values = [searchText];
+		const rows = await executeQuery(query, values);
+
+		return rows || [];
+	} catch (error) {
+		logger.error("getFilesByText", error.message);
+
+		return [];
+	}
+}

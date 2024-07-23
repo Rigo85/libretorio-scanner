@@ -23,6 +23,10 @@ export function onMessageEvent(message: any, ws: WebSocket) {
 		"search": async () => {
 			await onSearchEvent(ws, messageObj);
 		},
+		// eslint-disable-next-line @typescript-eslint/naming-convention
+		"search_text": async () => {
+			await onSearchTextEvent(ws, messageObj);
+		},
 		"update": async () => {
 			await onUpdateEvent(ws, messageObj);
 		},
@@ -51,6 +55,15 @@ async function onSearchEvent(ws: WebSocket, messageObj: { event: string; data: a
 	try {
 		const bookInfo = await BooksStore.getInstance().searchBookInfoOpenLibrary(messageObj.data);
 		sendMessage(ws, {event: "search_details", data: bookInfo});
+	} catch (error) {
+		logger.error("onSearchEvent", error);
+	}
+}
+
+async function onSearchTextEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
+	try {
+		const scanResult = await BooksStore.getInstance().searchBooksByTextOnDb(messageObj.data);
+		sendMessage(ws, {event: "list", data: scanResult});
 	} catch (error) {
 		logger.error("onSearchEvent", error);
 	}

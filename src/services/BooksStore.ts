@@ -1,7 +1,7 @@
 import path from "path";
 
 import { Logger } from "(src)/helpers/Logger";
-import { getFiles, getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(src)/services/dbService";
+import { getFiles, getFilesByText, getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(src)/services/dbService";
 import { Scanner, ScanResult, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
 import { Directory, fillFileDetails, removeTrailingSeparator, File } from "(src)/helpers/FileUtils";
@@ -143,11 +143,36 @@ export class BooksStore {
 		logger.info("updateBooksDetails:", {id: file.id, name: file.name});
 
 		try {
-			return updateFile(file);
+			const response = await updateFile(file);
+			// TODO: Si 'response' y existe la imagen, copiar el temp_cover/file.webDetails.cover_i.jpg a covers/file.coverId.jpg
+
+			return response;
 		} catch (error) {
 			logger.error("updateBooksDetails", error);
 
 			return false;
+		}
+	}
+
+	async searchBooksByTextOnDb(data: { searchText: string }): Promise<ScanResult> {
+		logger.info("searchBooksByTextOnDb:", data);
+
+		try {
+			const scanRoots = await getScanRoots();
+
+			if (!scanRoots?.length) {
+				logger.error("searchBooksByTextOnDb", "No scan roots found");
+				return undefined;
+			}
+
+			const directories = JSON.parse(scanRoots[0].directories) as Directory;
+			const files = await getFilesByText(data.searchText);
+
+			return {directories, files};
+		} catch (error) {
+			logger.error("searchBooksByTextOnDb", error);
+
+			return undefined;
 		}
 	}
 }
