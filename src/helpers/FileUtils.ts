@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import path from "path";
 import stringSimilarity from "string-similarity";
+import fs from "fs";
 
 import { getEbookMeta } from "(src)/services/calibre-info";
 import { getBookInfoOpenLibrary } from "(src)/services/book-info";
@@ -174,4 +175,11 @@ function cleanTitle(title: string): string {
 		.replace(/[^a-zA-ZñÑáéíóúÁÉÍÓÚ0-9 ]/g, " ")
 		.replace(/\s+/g, " ")
 		.toLowerCase();
+}
+
+export function checkIfPathExistsAndIsFile(filePath: string): boolean {
+	if (fs.existsSync(filePath)) {
+		return fs.statSync(filePath).isFile();
+	}
+	return false;
 }

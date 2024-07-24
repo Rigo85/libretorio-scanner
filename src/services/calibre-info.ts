@@ -1,18 +1,11 @@
 import { exec } from "child_process";
 import util from "util";
-import fs from "fs";
 import path from "path";
 import { Logger } from "(src)/helpers/Logger";
+import { checkIfPathExistsAndIsFile } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Calibre Info");
 const execPromise = util.promisify(exec);
-
-function checkIfPathExistsAndIsFile(filePath: string): boolean {
-	if (fs.existsSync(filePath)) {
-		return fs.statSync(filePath).isFile();
-	}
-	return false;
-}
 
 export async function getEbookMeta(filePath: string, coverId: string): Promise<any> {
 	// logger.info(`getEbookMeta: "${filePath}"`);

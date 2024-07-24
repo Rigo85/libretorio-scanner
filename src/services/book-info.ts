@@ -76,10 +76,10 @@ export async function searchBookInfoOpenLibrary(title: string, author: string): 
 				const coverId = doc.cover_i;
 				const coverUrl = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : "N/A";
 
-				// if (coverId) {
-				// 	const coverPath = path.join(__dirname, "..", "public", "temp_covers", `${coverId}.jpg`);
-				// 	await downloadImage(coverUrl, coverPath);
-				// }
+				if (coverId) {
+					const coverPath = path.join(__dirname, "..", "public", "temp_covers", `${coverId}.jpg`);
+					await downloadImage(coverUrl, coverPath);
+				}
 			}
 
 			logger.info("searchBookInfoOpenLibrary", "Done.");

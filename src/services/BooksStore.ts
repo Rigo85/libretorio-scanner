@@ -1,10 +1,17 @@
 import path from "path";
+import shell, { cp } from "shelljs";
 
 import { Logger } from "(src)/helpers/Logger";
 import { getFiles, getFilesByText, getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(src)/services/dbService";
 import { Scanner, ScanResult, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
-import { Directory, fillFileDetails, removeTrailingSeparator, File } from "(src)/helpers/FileUtils";
+import {
+	Directory,
+	fillFileDetails,
+	removeTrailingSeparator,
+	File,
+	checkIfPathExistsAndIsFile
+} from "(src)/helpers/FileUtils";
 import { searchBookInfoOpenLibrary } from "(src)/services/book-info";
 import { updateFile } from "(src)/services/dbService";
 
@@ -133,8 +140,6 @@ export class BooksStore {
 		}
 	}
 
-	// actualizar metadata manualmente.
-
 	// leer
 
 	// descargar
@@ -144,7 +149,26 @@ export class BooksStore {
 
 		try {
 			const response = await updateFile(file);
-			// TODO: Si 'response' y existe la imagen, copiar el temp_cover/file.webDetails.cover_i.jpg a covers/file.coverId.jpg
+
+			if (response) {
+				// eslint-disable-next-line @typescript-eslint/naming-convention
+				const cover_i = this.getWebDetailsCoverId(file);
+				if (cover_i) {
+					const coverPath = path.join(__dirname, "..", "public", "temp_covers", `${cover_i}.jpg`);
+					if (checkIfPathExistsAndIsFile(coverPath)) {
+						const cpResponse = shell.cp(coverPath, path.join(__dirname, "..", "public", "covers", `${cover_i}.jpg`));
+						if (cpResponse.code === 0) {
+							return true;
+						} else {
+							logger.error(`updateBooksDetails(code=${cpResponse.code})`, cpResponse.stderr ?? "Error copying cover image.");
+						}
+					} else {
+						logger.error("updateBooksDetails", `Cover image not found: "${coverPath}".`);
+					}
+				} else {
+					logger.error("updateBooksDetails", "Cover ID not found.");
+				}
+			}
 
 			return response;
 		} catch (error) {
@@ -171,6 +195,18 @@ export class BooksStore {
 			return {directories, files};
 		} catch (error) {
 			logger.error("searchBooksByTextOnDb", error);
+
+			return undefined;
+		}
+	}
+
+	private getWebDetailsCoverId(file: File): string | number | undefined {
+		try {
+			const webDetails = JSON.parse(file.webDetails ?? "{}");
+
+			return webDetails.cover_i;
+		} catch (error) {
+			console.error("getWebDetailsCoverId", error);
 
 			return undefined;
 		}
