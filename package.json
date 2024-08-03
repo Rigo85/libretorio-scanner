@@ -13,12 +13,13 @@
         "watch": "concurrently -k -p \"[{name}]\" -n \"TypeScript,Node\" -c \"cyan.bold,green.bold\" \"npm run watch-ts\" \"npm run watch-node\"",
         "watch-ts": "tsc -w",
         "serve-debug": "nodemon --inspect dist/server.js",
-        "build": "npm run build-ts && npm run lint && npm run copy-static-assets",
+        "build": "npm run build-ts && npm run lint && npm run copy-static-assets && npm run 7z-perm",
         "copy-static-assets": "ts-node copyStaticAssets.ts",
         "build-ts": "tsc",
         "lint": "eslint -c .eslintrc.js --ext .ts src/**/*.ts",
         "lint-fix": "eslint --fix src/**/*.ts",
-        "postinstall": "npm run build"
+        "7z-perm": "chmod +x node_modules/7zip-bin/linux/x64/7za",
+        "postinstall": "npm run build && npm run 7z-perm"
     },
     "keywords": [],
     "author": "Rigoberto L. Salgado Reyes <rlsalgado2006@gmail.com>",
@@ -27,6 +28,7 @@
         "node": "20.x"
     },
     "dependencies": {
+        "7zip-bin": "^5.2.0",
         "axios": "^1.7.2",
         "chokidar": "^3.6.0",
         "compression": "^1.7.4",
@@ -38,8 +40,11 @@
         "helmet": "^7.1.0",
         "lusca": "^1.7.0",
         "module-alias": "^2.2.3",
+        "node-7z": "^3.0.0",
+        "node-unrar-js": "^2.0.2",
         "pg": "^8.11.3",
         "redis": "^4.6.15",
+        "sharp": "^0.33.4",
         "string-similarity": "^4.0.4",
         "uuid": "^10.0.0",
         "ws": "^8.15.1"
@@ -52,6 +57,7 @@
         "@types/fs-extra": "^11.0.4",
         "@types/lusca": "^1.7.4",
         "@types/node": "^20.8.5",
+        "@types/node-7z": "^2.1.8",
         "@types/pg": "^8.10.9",
         "@types/shelljs": "^0.8.15",
         "@types/string-similarity": "^4.0.2",

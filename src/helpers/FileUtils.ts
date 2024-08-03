@@ -34,6 +34,12 @@ export interface Directory {
 	directories: Directory[];
 }
 
+export interface DecompressResponse {
+	success: "OK" | "ERROR";
+	error?: string;
+	pages?: any[];
+}
+
 export async function scanCompareUpdate(scanRootPath: string) {
 	logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
 

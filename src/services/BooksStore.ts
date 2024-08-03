@@ -1,19 +1,30 @@
 import path from "path";
-import shell, { cp } from "shelljs";
-
+import shell from "shelljs";
 import { Logger } from "(src)/helpers/Logger";
-import { getFiles, getFilesByText, getScanRoots, insertFile, insertScanRoot, ScanRoot } from "(src)/services/dbService";
+import {
+	getFiles,
+	getFilesByText,
+	getScanRoots,
+	insertFile,
+	insertScanRoot,
+	ScanRoot,
+	updateFile
+} from "(src)/services/dbService";
 import { Scanner, ScanResult, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
 import {
+	checkIfPathExistsAndIsFile,
+	DecompressResponse,
 	Directory,
-	fillFileDetails,
-	removeTrailingSeparator,
 	File,
-	checkIfPathExistsAndIsFile
+	fillFileDetails,
+	removeTrailingSeparator
 } from "(src)/helpers/FileUtils";
 import { searchBookInfoOpenLibrary } from "(src)/services/book-info";
-import { updateFile } from "(src)/services/dbService";
+import fs from "fs-extra";
+import * as unrar from "node-unrar-js";
+import { extractFull } from "node-7z";
+import sharp from "sharp";
 
 const logger = new Logger("Books Store");
 
@@ -211,4 +222,144 @@ export class BooksStore {
 			return undefined;
 		}
 	}
+
+	public async decompressCB7(data: { filePath: string }): Promise<DecompressResponse> {
+		let extractPath = "";
+		try {
+			extractPath = path.join(__dirname, "extracted");
+			if (!fs.existsSync(extractPath)) {
+				fs.mkdirSync(extractPath);
+			}
+
+			await new Promise<void>((resolve, reject) => {
+				const extraction = extractFull(data.filePath, extractPath, {
+					$bin: require("7zip-bin").path7za
+				});
+
+				extraction.on("end", () => {
+					console.log("Extraction complete");
+					resolve();
+				});
+				extraction.on("error", (err: any) => {
+					console.error("Error during extraction:", err);
+					reject(err);
+				});
+			});
+
+			let images = await this.findImagesInDirectory(extractPath);
+
+			images = images.sort((a, b) => a.path.localeCompare(b.path)).map(img => img.base64);
+
+			fs.rmSync(extractPath, {recursive: true});
+
+			return {success: "OK", pages: images};
+		} catch (error) {
+			logger.error("decompressCB7", error);
+
+			return {success: "ERROR", error: error.message || "Error extracting comic/manga book."};
+		} finally {
+			if (extractPath && fs.existsSync(extractPath)) {
+				fs.rmSync(extractPath, {recursive: true});
+			}
+		}
+	}
+
+	private async findImagesInDirectory(dir: string): Promise<any[]> {
+		let images: any[] = [];
+		const files = fs.readdirSync(dir);
+
+		for (const file of files) {
+			const fullPath = path.join(dir, file);
+			const stat = fs.statSync(fullPath);
+
+			if (stat.isDirectory()) {
+				images = images.concat(await this.findImagesInDirectory(fullPath));
+			} else {
+				const fileExtension = path.extname(file).toLowerCase();
+				if ([".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(fileExtension)) {
+					// console.log(`Processing image: ${fullPath}`);
+					try {
+						const imageBuffer = await sharp(fullPath).toBuffer();
+						const base64Image = imageBuffer.toString("base64");
+						images.push({
+							path: fullPath,
+							base64: `data:image/${fileExtension.slice(1)};base64,${base64Image}`
+						});
+					} catch (err) {
+						console.error("Error processing image:", err);
+					}
+				}
+			}
+		}
+		return images;
+	}
+
+	public async decompressRAR(data: { filePath: string }): Promise<DecompressResponse> {
+		logger.info(`decompressBook: "${data.filePath || "<empty path>"}`);
+
+		try {
+			if (!data?.filePath) {
+				logger.info("The path to the RAR file has not been provided.");
+				return {error: "The path to the Comic/Manga file has not been provided.", success: "ERROR"};
+			}
+
+			if (!fs.existsSync(data.filePath)) {
+				logger.info(`The RAR file does not exist: "${data.filePath}"`);
+				return {error: `The Comic/Manga file does not exist: "${data.filePath}"`, success: "ERROR"};
+			}
+
+			const buf = Uint8Array.from(fs.readFileSync(data.filePath)).buffer;
+			const extractor = await unrar.createExtractorFromData({data: buf});
+
+			const list = extractor.getFileList();
+			if (!list.fileHeaders) {
+				logger.info("Error retrieving the list of files.");
+				return {error: "Error opening Comic/Manga file.", success: "ERROR"};
+			}
+
+			const fileHeaders = [...list.fileHeaders]
+				.filter((fileHeader) => !fileHeader.flags.directory)
+				.filter((fileHeader) => fileHeader.name.endsWith(".jpg") || fileHeader.name.endsWith(".png"))
+				.sort((a, b) => a.name.localeCompare(b.name));
+
+			const pages = [] as any[];
+
+			for (const fileHeader of fileHeaders) {
+				const extracted = extractor.extract({files: [fileHeader.name]});
+
+				if (!extracted?.files) {
+					logger.info(`Error extracting the file: "${fileHeader.name}"`);
+					continue;
+				}
+
+				const _pages = [...extracted.files];
+				if (!_pages.length) {
+					logger.info(`No pages have been extracted from the file: "${fileHeader.name}"`);
+					continue;
+				}
+
+				pages.push(..._pages
+					.filter((file) => file.extraction)
+					.map((file) => {
+						return `data:image/${this.getImageFormat(file.fileHeader.name)};base64,${Buffer.from(file.extraction).toString("base64")}`;
+					}))
+				;
+			}
+
+			return {pages, success: "OK"};
+		} catch (error) {
+			logger.error("decompressBook", error);
+
+			return {success: "ERROR", error: error.message || "Error extracting comic/manga book."};
+		}
+	}
+
+	private getImageFormat(fileName: string): string {
+		if (fileName.endsWith(".png")) {
+			return "png";
+		} else {
+			return "jpeg";
+		}
+	}
+
 }

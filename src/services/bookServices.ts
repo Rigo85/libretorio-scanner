@@ -2,6 +2,7 @@ import { WebSocket } from "ws";
 
 import { Logger } from "(src)/helpers/Logger";
 import { BooksStore } from "(src)/services/BooksStore";
+import { DecompressResponse } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Book Service");
 
@@ -29,6 +30,9 @@ export function onMessageEvent(message: any, ws: WebSocket) {
 		},
 		"update": async () => {
 			await onUpdateEvent(ws, messageObj);
+		},
+		"decompress": async () => {
+			await onDecompressEvent(ws, messageObj);
 		},
 		"default": async () => {
 			ws.send("{\"event\":\"errors\", \"data\": {\"errors\":[\"An error has occurred. Invalid event kind.\"]}}");
@@ -75,6 +79,25 @@ async function onUpdateEvent(ws: WebSocket, messageObj: { event: string; data: a
 		sendMessage(ws, {event: "update", data: {response}});
 	} catch (error) {
 		logger.error("onUpdateEvent", error);
+	}
+}
+
+async function onDecompressEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
+	try {
+		const extension = messageObj.data.filePath.split(".").pop() ?? "";
+		const dispatch: Record<string, (data: { filePath: string }) => Promise<DecompressResponse>> = {
+			"cb7": BooksStore.getInstance().decompressCB7.bind(BooksStore.getInstance()),
+			"rar": BooksStore.getInstance().decompressRAR.bind(BooksStore.getInstance())
+		};
+
+		if (dispatch[extension]) {
+			const response = await dispatch[extension](messageObj.data);
+			sendMessage(ws, {event: "decompress", data: {...response}});
+		} else {
+			sendMessage(ws, {event: "errors", data: {errors: ["An error has occurred. Invalid file extension kind."]}});
+		}
+	} catch (error) {
+		logger.error("onDecompressEvent", error);
 	}
 }
 
