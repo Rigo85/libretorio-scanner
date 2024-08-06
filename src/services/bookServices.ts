@@ -87,14 +87,17 @@ async function onDecompressEvent(ws: WebSocket, messageObj: { event: string; dat
 		const extension = messageObj.data.filePath.split(".").pop() ?? "";
 		const dispatch: Record<string, (data: { filePath: string }) => Promise<DecompressResponse>> = {
 			"cb7": BooksStore.getInstance().decompressCB7.bind(BooksStore.getInstance()),
-			"rar": BooksStore.getInstance().decompressRAR.bind(BooksStore.getInstance())
+			"cbr": BooksStore.getInstance().decompressRAR.bind(BooksStore.getInstance())
 		};
 
 		if (dispatch[extension]) {
 			const response = await dispatch[extension](messageObj.data);
 			sendMessage(ws, {event: "decompress", data: {...response}});
 		} else {
-			sendMessage(ws, {event: "errors", data: {errors: ["An error has occurred. Invalid file extension kind."]}});
+			sendMessage(ws, {
+				event: "decompress",
+				data: {success: "ERROR", error: "An error has occurred. Invalid file extension kind."}
+			});
 		}
 	} catch (error) {
 		logger.error("onDecompressEvent", error);
