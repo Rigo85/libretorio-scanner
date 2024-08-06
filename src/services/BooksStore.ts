@@ -1,5 +1,12 @@
 import path from "path";
 import shell from "shelljs";
+import fs from "fs-extra";
+import * as unrar from "node-unrar-js";
+import { extractFull } from "node-7z";
+import sharp from "sharp";
+import { exec } from "child_process";
+import util from "util";
+
 import { Logger } from "(src)/helpers/Logger";
 import {
 	getFiles,
@@ -13,7 +20,7 @@ import {
 import { Scanner, ScanResult, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
 import {
-	checkIfPathExistsAndIsFile,
+	checkIfPathExistsAndIsFile, ConvertToPdfResponse,
 	DecompressResponse,
 	Directory,
 	File,
@@ -21,11 +28,8 @@ import {
 	removeTrailingSeparator
 } from "(src)/helpers/FileUtils";
 import { searchBookInfoOpenLibrary } from "(src)/services/book-info";
-import fs from "fs-extra";
-import * as unrar from "node-unrar-js";
-import { extractFull } from "node-7z";
-import sharp from "sharp";
 
+const execPromise = util.promisify(exec);
 const logger = new Logger("Books Store");
 
 const envScanRoot = process.env.SCAN_ROOT;
@@ -150,10 +154,6 @@ export class BooksStore {
 			return [];
 		}
 	}
-
-	// leer
-
-	// descargar
 
 	public async updateBooksDetails(file: File): Promise<boolean> {
 		logger.info("updateBooksDetails:", {id: file.id, name: file.name});
@@ -362,4 +362,68 @@ export class BooksStore {
 		}
 	}
 
+	async convertEpubToPdf(data: { filePath: string; id: string }): Promise<ConvertToPdfResponse> {
+		logger.info(`convertEpubToPdf: "${data.filePath || "<empty path>"}`);
+
+		try {
+			if (!data?.filePath) {
+				logger.info("The path to the EPUB file has not been provided.");
+				return {error: "The path to the EPUB file has not been provided.", success: "ERROR"};
+			}
+
+			if (!fs.existsSync(data.filePath)) {
+				logger.info(`The EPUB file does not exist: "${data.filePath}"`);
+				return {error: `The EPUB file does not exist: "${data.filePath}"`, success: "ERROR"};
+			}
+
+			const pdfDirPath = path.join(__dirname, "..", "public", "cache", data.id);
+			const pdfPath = path.join(pdfDirPath, `${data.id}.pdf`);
+
+			if (fs.existsSync(pdfPath)) {
+				return {pdfPath: path.join("/cache", data.id, `${data.id}.pdf`), success: "OK"};
+			} else {
+				fs.mkdirSync(pdfDirPath, {recursive: true});
+				const calibrePath = path.join(__dirname, "calibre", "ebook-convert");
+				const command = `${calibrePath} "${data.filePath}" "${pdfPath}"`;
+
+				const {stderr} = await execPromise(command);
+				if (stderr) {
+					logger.error(`convertEpubToPdf: ${stderr}`);
+					return {error: "An error has occurred converting epub to pdf.", success: "ERROR"};
+				}
+
+				return {pdfPath: path.join("/cache", data.id, `${data.id}.pdf`), success: "OK"};
+			}
+		} catch (error) {
+			logger.error("convertEpubToPdf", error);
+
+			return {success: "ERROR", error: error.message || "An error has occurred converting epub to pdf."};
+		}
+	}
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

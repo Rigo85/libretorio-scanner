@@ -2,7 +2,7 @@ import { WebSocket } from "ws";
 
 import { Logger } from "(src)/helpers/Logger";
 import { BooksStore } from "(src)/services/BooksStore";
-import { DecompressResponse } from "(src)/helpers/FileUtils";
+import { ConvertToPdfResponse, DecompressResponse } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Book Service");
 
@@ -33,6 +33,10 @@ export function onMessageEvent(message: any, ws: WebSocket) {
 		},
 		"decompress": async () => {
 			await onDecompressEvent(ws, messageObj);
+		},
+		// eslint-disable-next-line @typescript-eslint/naming-convention
+		"convert_to_pdf": async () => {
+			await onConvertToPdfEvent(ws, messageObj);
 		},
 		"default": async () => {
 			ws.send("{\"event\":\"errors\", \"data\": {\"errors\":[\"An error has occurred. Invalid event kind.\"]}}");
@@ -69,7 +73,7 @@ async function onSearchTextEvent(ws: WebSocket, messageObj: { event: string; dat
 		const scanResult = await BooksStore.getInstance().searchBooksByTextOnDb(messageObj.data);
 		sendMessage(ws, {event: "list", data: scanResult});
 	} catch (error) {
-		logger.error("onSearchEvent", error);
+		logger.error("onSearchTextEvent", error);
 	}
 }
 
@@ -79,6 +83,31 @@ async function onUpdateEvent(ws: WebSocket, messageObj: { event: string; data: a
 		sendMessage(ws, {event: "update", data: {response}});
 	} catch (error) {
 		logger.error("onUpdateEvent", error);
+	}
+}
+
+async function onConvertToPdfEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
+	try {
+		const extension = messageObj.data.filePath.split(".").pop() ?? "";
+		const dispatch: Record<string, (data: { filePath: string }) => Promise<ConvertToPdfResponse>> = {
+			"epub": BooksStore.getInstance().convertEpubToPdf.bind(BooksStore.getInstance())
+		};
+
+		if (dispatch[extension]) {
+			const response = await dispatch[extension](messageObj.data);
+			sendMessage(ws, {event: "convert_to_pdf", data: {...response}});
+		} else {
+			sendMessage(ws, {
+				event: "convert_to_pdf",
+				data: {success: "ERROR", error: "An error has occurred. Invalid file extension kind."}
+			});
+		}
+	} catch (error) {
+		logger.error("onConvertToPdfEvent", error);
+		sendMessage(ws, {
+			event: "convert_to_pdf",
+			data: {success: "ERROR", error: "An error has occurred."}
+		});
 	}
 }
 
@@ -101,6 +130,11 @@ async function onDecompressEvent(ws: WebSocket, messageObj: { event: string; dat
 		}
 	} catch (error) {
 		logger.error("onDecompressEvent", error);
+
+		sendMessage(ws, {
+			event: "decompress",
+			data: {success: "ERROR", error: "An error has occurred."}
+		});
 	}
 }
 

@@ -40,6 +40,12 @@ export interface DecompressResponse {
 	pages?: any[];
 }
 
+export interface ConvertToPdfResponse {
+	success: "OK" | "ERROR";
+	error?: string;
+	pdfPath?: string;
+}
+
 export async function scanCompareUpdate(scanRootPath: string) {
 	logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
 
