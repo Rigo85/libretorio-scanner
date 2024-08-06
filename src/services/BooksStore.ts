@@ -224,7 +224,7 @@ export class BooksStore {
 	}
 
 	public async decompressCB7(data: { filePath: string; id: string }): Promise<DecompressResponse> {
-		logger.info(`decompressBook: "${data.filePath || "<empty path>"}`);
+		logger.info(`decompressBook: "${JSON.stringify(data)}`);
 		let extractPath = "";
 		const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
 		const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
@@ -305,7 +305,7 @@ export class BooksStore {
 	}
 
 	public async decompressRAR(data: { filePath: string; id: string }): Promise<DecompressResponse> {
-		logger.info(`decompressBook: "${data.filePath || "<empty path>"}`);
+		logger.info(`decompressBook: "${JSON.stringify(data)}`);
 
 		try {
 			if (!data?.filePath) {
