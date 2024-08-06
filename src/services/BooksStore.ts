@@ -223,36 +223,46 @@ export class BooksStore {
 		}
 	}
 
-	public async decompressCB7(data: { filePath: string }): Promise<DecompressResponse> {
+	public async decompressCB7(data: { filePath: string; id: string }): Promise<DecompressResponse> {
+		logger.info(`decompressBook: "${data.filePath || "<empty path>"}`);
 		let extractPath = "";
+		const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
+		const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
 		try {
-			extractPath = path.join(__dirname, "extracted");
-			if (!fs.existsSync(extractPath)) {
-				fs.mkdirSync(extractPath);
+			if (fs.existsSync(cacheFilePath)) {
+				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+				return {pages, success: "OK"};
+			} else {
+				extractPath = path.join(__dirname, "extracted");
+				if (!fs.existsSync(extractPath)) {
+					fs.mkdirSync(extractPath);
+				}
+
+				await new Promise<void>((resolve, reject) => {
+					const extraction = extractFull(data.filePath, extractPath, {
+						$bin: require("7zip-bin").path7za
+					});
+
+					extraction.on("end", () => {
+						console.log("Extraction complete");
+						resolve();
+					});
+					extraction.on("error", (err: any) => {
+						console.error("Error during extraction:", err);
+						reject(err);
+					});
+				});
+
+				let images = await this.findImagesInDirectory(extractPath);
+
+				images = images.sort((a, b) => a.path.localeCompare(b.path)).map(img => img.base64);
+
+				fs.rmSync(extractPath, {recursive: true});
+
+				this.savePagesToFile(images, data.id);
+
+				return {success: "OK", pages: images};
 			}
-
-			await new Promise<void>((resolve, reject) => {
-				const extraction = extractFull(data.filePath, extractPath, {
-					$bin: require("7zip-bin").path7za
-				});
-
-				extraction.on("end", () => {
-					console.log("Extraction complete");
-					resolve();
-				});
-				extraction.on("error", (err: any) => {
-					console.error("Error during extraction:", err);
-					reject(err);
-				});
-			});
-
-			let images = await this.findImagesInDirectory(extractPath);
-
-			images = images.sort((a, b) => a.path.localeCompare(b.path)).map(img => img.base64);
-
-			fs.rmSync(extractPath, {recursive: true});
-
-			return {success: "OK", pages: images};
 		} catch (error) {
 			logger.error("decompressCB7", error);
 
@@ -294,7 +304,7 @@ export class BooksStore {
 		return images;
 	}
 
-	public async decompressRAR(data: { filePath: string }): Promise<DecompressResponse> {
+	public async decompressRAR(data: { filePath: string; id: string }): Promise<DecompressResponse> {
 		logger.info(`decompressBook: "${data.filePath || "<empty path>"}`);
 
 		try {
@@ -308,49 +318,70 @@ export class BooksStore {
 				return {error: `The Comic/Manga file does not exist: "${data.filePath}"`, success: "ERROR"};
 			}
 
-			const buf = Uint8Array.from(fs.readFileSync(data.filePath)).buffer;
-			const extractor = await unrar.createExtractorFromData({data: buf});
+			const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
+			const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
 
-			const list = extractor.getFileList();
-			if (!list.fileHeaders) {
-				logger.info("Error retrieving the list of files.");
-				return {error: "Error opening Comic/Manga file.", success: "ERROR"};
-			}
+			if (fs.existsSync(cacheFilePath)) {
+				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+				return {pages, success: "OK"};
+			} else {
+				const buf = Uint8Array.from(fs.readFileSync(data.filePath)).buffer;
+				const extractor = await unrar.createExtractorFromData({data: buf});
 
-			const fileHeaders = [...list.fileHeaders]
-				.filter((fileHeader) => !fileHeader.flags.directory)
-				.filter((fileHeader) => fileHeader.name.endsWith(".jpg") || fileHeader.name.endsWith(".png"))
-				.sort((a, b) => a.name.localeCompare(b.name));
-
-			const pages = [] as any[];
-
-			for (const fileHeader of fileHeaders) {
-				const extracted = extractor.extract({files: [fileHeader.name]});
-
-				if (!extracted?.files) {
-					logger.info(`Error extracting the file: "${fileHeader.name}"`);
-					continue;
+				const list = extractor.getFileList();
+				if (!list.fileHeaders) {
+					logger.info("Error retrieving the list of files.");
+					return {error: "Error opening Comic/Manga file.", success: "ERROR"};
 				}
 
-				const _pages = [...extracted.files];
-				if (!_pages.length) {
-					logger.info(`No pages have been extracted from the file: "${fileHeader.name}"`);
-					continue;
+				const fileHeaders = [...list.fileHeaders]
+					.filter((fileHeader) => !fileHeader.flags.directory)
+					.filter((fileHeader) => fileHeader.name.endsWith(".jpg") || fileHeader.name.endsWith(".png"))
+					.sort((a, b) => a.name.localeCompare(b.name));
+
+				const pages = [] as any[];
+
+				for (const fileHeader of fileHeaders) {
+					const extracted = extractor.extract({files: [fileHeader.name]});
+
+					if (!extracted?.files) {
+						logger.info(`Error extracting the file: "${fileHeader.name}"`);
+						continue;
+					}
+
+					const _pages = [...extracted.files];
+					if (!_pages.length) {
+						logger.info(`No pages have been extracted from the file: "${fileHeader.name}"`);
+						continue;
+					}
+
+					pages.push(..._pages
+						.filter((file) => file.extraction)
+						.map((file) => {
+							return `data:image/${this.getImageFormat(file.fileHeader.name)};base64,${Buffer.from(file.extraction).toString("base64")}`;
+						}))
+					;
 				}
 
-				pages.push(..._pages
-					.filter((file) => file.extraction)
-					.map((file) => {
-						return `data:image/${this.getImageFormat(file.fileHeader.name)};base64,${Buffer.from(file.extraction).toString("base64")}`;
-					}))
-				;
-			}
+				this.savePagesToFile(pages, data.id);
 
-			return {pages, success: "OK"};
+				return {pages, success: "OK"};
+			}
 		} catch (error) {
 			logger.error("decompressBook", error);
 
 			return {success: "ERROR", error: error.message || "Error extracting comic/manga book."};
+		}
+	}
+
+	private savePagesToFile(pages: any[], id: string): Promise<void> {
+		try {
+			const cachePath = path.join(__dirname, "..", "public", "cache", id);
+			const cacheFilePath = path.join(cachePath, `${id}.cache`);
+			fs.mkdirSync(cachePath, {recursive: true});
+			return fs.writeFile(cacheFilePath, JSON.stringify(pages));
+		} catch (error) {
+			logger.error("savePagesToFile", error);
 		}
 	}
 
