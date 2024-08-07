@@ -90,7 +90,18 @@ async function onConvertToPdfEvent(ws: WebSocket, messageObj: { event: string; d
 	try {
 		const extension = messageObj.data.filePath.split(".").pop() ?? "";
 		const dispatch: Record<string, (data: { filePath: string }) => Promise<ConvertToPdfResponse>> = {
-			"epub": BooksStore.getInstance().convertEpubToPdf.bind(BooksStore.getInstance())
+			"epub": BooksStore.getInstance().convertWithCalibreToPdf.bind(BooksStore.getInstance()),
+			"doc": BooksStore.getInstance().convertOfficeToPdf.bind(BooksStore.getInstance()),
+			"docx": BooksStore.getInstance().convertOfficeToPdf.bind(BooksStore.getInstance()),
+			"ppt": BooksStore.getInstance().convertOfficeToPdf.bind(BooksStore.getInstance()),
+			"pptx": BooksStore.getInstance().convertOfficeToPdf.bind(BooksStore.getInstance()),
+			"xls": BooksStore.getInstance().convertOfficeToPdf.bind(BooksStore.getInstance()),
+			"xlsx": BooksStore.getInstance().convertOfficeToPdf.bind(BooksStore.getInstance()),
+			"rtf": BooksStore.getInstance().convertOfficeToPdf.bind(BooksStore.getInstance()),
+			"txt": BooksStore.getInstance().convertHtmlToPdf.bind(BooksStore.getInstance()),
+			"html": BooksStore.getInstance().convertHtmlToPdf.bind(BooksStore.getInstance()),
+			"htm": BooksStore.getInstance().convertHtmlToPdf.bind(BooksStore.getInstance()),
+			"lit": BooksStore.getInstance().convertWithCalibreToPdf.bind(BooksStore.getInstance()),
 		};
 
 		if (dispatch[extension]) {

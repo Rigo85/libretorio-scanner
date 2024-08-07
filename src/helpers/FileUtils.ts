@@ -46,6 +46,8 @@ export interface ConvertToPdfResponse {
 	pdfPath?: string;
 }
 
+export type ConventToPdfUtilFunction = (filePath: string, coverId: string) => Promise<void>;
+
 export async function scanCompareUpdate(scanRootPath: string) {
 	logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
 

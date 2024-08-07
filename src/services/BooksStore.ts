@@ -20,7 +20,9 @@ import {
 import { Scanner, ScanResult, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
 import {
-	checkIfPathExistsAndIsFile, ConvertToPdfResponse,
+	checkIfPathExistsAndIsFile,
+	ConventToPdfUtilFunction,
+	ConvertToPdfResponse,
 	DecompressResponse,
 	Directory,
 	File,
@@ -224,7 +226,7 @@ export class BooksStore {
 	}
 
 	public async decompressCB7(data: { filePath: string; id: string }): Promise<DecompressResponse> {
-		logger.info(`decompressBook: "${JSON.stringify(data)}`);
+		logger.info(`decompressBook: '${JSON.stringify(data)}'`);
 		let extractPath = "";
 		const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
 		const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
@@ -305,7 +307,7 @@ export class BooksStore {
 	}
 
 	public async decompressRAR(data: { filePath: string; id: string }): Promise<DecompressResponse> {
-		logger.info(`decompressBook: "${JSON.stringify(data)}`);
+		logger.info(`decompressBook: '${JSON.stringify(data)}'`);
 
 		try {
 			if (!data?.filePath) {
@@ -393,18 +395,57 @@ export class BooksStore {
 		}
 	}
 
-	async convertEpubToPdf(data: { filePath: string; id: string }): Promise<ConvertToPdfResponse> {
-		logger.info(`convertEpubToPdf: "${data.filePath || "<empty path>"}`);
+	public async convertWithCalibreToPdf(data: { filePath: string; id: string }): Promise<ConvertToPdfResponse> {
+		logger.info(`convertWithCalibreToPdf: '${JSON.stringify(data)}'`);
+
+		const pdfDirPath = path.join(__dirname, "..", "public", "cache", data.id);
+		const pdfPath = path.join(pdfDirPath, `${data.id}.pdf`);
+		const calibrePath = path.join(__dirname, "calibre", "ebook-convert");
+		const command = `${calibrePath} "${data.filePath}" "${pdfPath}"`;
+
+		return await this.convertToPdf(data, command);
+	}
+
+	async convertOfficeToPdf(data: { filePath: string; id: string }): Promise<ConvertToPdfResponse> {
+		logger.info(`convertOfficeToPdf: '${JSON.stringify(data)}'`);
+
+		const pdfDirPath = path.join(__dirname, "..", "public", "cache", data.id);
+		const command = `LD_LIBRARY_PATH=/usr/lib/libreoffice/program/ libreoffice --headless --convert-to pdf --outdir "${pdfDirPath}" "${data.filePath}"`;
+		const utilFun = async (filePath: string, id: string) => {
+			const pdfFile = path.join(pdfDirPath, `${data.id}.pdf`);
+			const outputPdfFile = path.join(pdfDirPath, `${path.basename(data.filePath, path.extname(data.filePath))}.pdf`);
+			fs.renameSync(outputPdfFile, pdfFile);
+		};
+
+		return await this.convertToPdf(data, command, utilFun);
+	}
+
+	async convertHtmlToPdf(data: { filePath: string; id: string }): Promise<ConvertToPdfResponse> {
+		logger.info(`convertHtmlToPdf: '${JSON.stringify(data)}'`);
+
+		const pdfDirPath = path.join(__dirname, "..", "public", "cache", data.id);
+		const pdfPath = path.join(pdfDirPath, `${data.id}.pdf`);
+		const command = `htmldoc --webpage --quiet -f "${pdfPath}" "${data.filePath}"`;
+
+		return await this.convertToPdf(data, command);
+	}
+
+	async convertToPdf(
+		data: { filePath: string; id: string },
+		command: string,
+		utilFun?: ConventToPdfUtilFunction): Promise<ConvertToPdfResponse> {
+
+		logger.info(`convertToPdf: '${JSON.stringify(data)}'`);
 
 		try {
 			if (!data?.filePath) {
-				logger.info("The path to the EPUB file has not been provided.");
-				return {error: "The path to the EPUB file has not been provided.", success: "ERROR"};
+				logger.info("The path to the file has not been provided.");
+				return {error: "The path to the file has not been provided.", success: "ERROR"};
 			}
 
 			if (!fs.existsSync(data.filePath)) {
-				logger.info(`The EPUB file does not exist: "${data.filePath}"`);
-				return {error: `The EPUB file does not exist: "${data.filePath}"`, success: "ERROR"};
+				logger.info(`The file does not exist: "${data.filePath}"`);
+				return {error: `The file does not exist: "${data.filePath}"`, success: "ERROR"};
 			}
 
 			const pdfDirPath = path.join(__dirname, "..", "public", "cache", data.id);
@@ -414,21 +455,23 @@ export class BooksStore {
 				return {pdfPath: path.join("/cache", data.id, `${data.id}.pdf`), success: "OK"};
 			} else {
 				fs.mkdirSync(pdfDirPath, {recursive: true});
-				const calibrePath = path.join(__dirname, "calibre", "ebook-convert");
-				const command = `${calibrePath} "${data.filePath}" "${pdfPath}"`;
 
 				const {stderr} = await execPromise(command);
 				if (stderr) {
-					logger.error(`convertEpubToPdf: ${stderr}`);
-					return {error: "An error has occurred converting epub to pdf.", success: "ERROR"};
+					logger.error(`convertToPdf: ${stderr}`);
+					return {error: "An error has occurred converting to pdf.", success: "ERROR"};
+				}
+
+				if (utilFun) {
+					await utilFun(data.filePath, data.id);
 				}
 
 				return {pdfPath: path.join("/cache", data.id, `${data.id}.pdf`), success: "OK"};
 			}
 		} catch (error) {
-			logger.error("convertEpubToPdf", error);
+			logger.error("convertToPdf", error);
 
-			return {success: "ERROR", error: error.message || "An error has occurred converting epub to pdf."};
+			return {success: "ERROR", error: error.message || "An error has occurred converting to pdf."};
 		}
 	}
 }
