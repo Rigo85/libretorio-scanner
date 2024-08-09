@@ -101,7 +101,7 @@ async function onConvertToPdfEvent(ws: WebSocket, messageObj: { event: string; d
 			"txt": BooksStore.getInstance().convertHtmlToPdf.bind(BooksStore.getInstance()),
 			"html": BooksStore.getInstance().convertHtmlToPdf.bind(BooksStore.getInstance()),
 			"htm": BooksStore.getInstance().convertHtmlToPdf.bind(BooksStore.getInstance()),
-			"lit": BooksStore.getInstance().convertWithCalibreToPdf.bind(BooksStore.getInstance()),
+			"lit": BooksStore.getInstance().convertWithCalibreToPdf.bind(BooksStore.getInstance())
 		};
 
 		if (dispatch[extension]) {
@@ -124,11 +124,13 @@ async function onConvertToPdfEvent(ws: WebSocket, messageObj: { event: string; d
 
 async function onDecompressEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
 	try {
-		const extension = messageObj.data.filePath.split(".").pop() ?? "";
+		// const extension = messageObj.data.filePath.split(".").pop() ?? "";
+		const extension = BooksStore.getInstance().detectCompressionType(messageObj.data.filePath);
+
 		const dispatch: Record<string, (data: { filePath: string }) => Promise<DecompressResponse>> = {
 			"cb7": BooksStore.getInstance().decompressCB7.bind(BooksStore.getInstance()),
 			"cbr": BooksStore.getInstance().decompressRAR.bind(BooksStore.getInstance()),
-			"cbz": BooksStore.getInstance().decompressZIP.bind(BooksStore.getInstance()),
+			"cbz": BooksStore.getInstance().decompressZIP.bind(BooksStore.getInstance())
 		};
 
 		if (dispatch[extension]) {

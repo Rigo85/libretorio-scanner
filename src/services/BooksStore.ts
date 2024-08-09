@@ -428,6 +428,39 @@ export class BooksStore {
 		}
 	}
 
+	public detectCompressionType(filePath: string): string {
+		try {
+			if (filePath?.trim()) {
+				const buffer = Buffer.alloc(4); // Leemos los primeros 4 bytes
+				const fd = fs.openSync(filePath, "r");
+				fs.readSync(fd, buffer, 0, 4, 0);
+				fs.closeSync(fd);
+
+				// Magic numbers para 7z, RAR y ZIP
+				const magicNumbers: { [key: string]: string } = {
+					/* eslint-disable @typescript-eslint/naming-convention */
+					"504B0304": "cbz",   // ZIP
+					"52617221": "cbr",   // RAR (RAR3)
+					"377ABCAF": "cb7"    // 7-Zip
+					/* eslint-enable @typescript-eslint/naming-convention */
+				};
+
+				const fileSignature = buffer.toString("hex").toUpperCase();
+				for (const [magic, type] of Object.entries(magicNumbers)) {
+					if (fileSignature.startsWith(magic)) {
+						return type;
+					}
+				}
+			}
+
+			return "";
+		} catch (error) {
+			logger.error("detectCompressionType", error);
+
+			return "";
+		}
+	}
+
 	private imageToBase64(filePath: string): Promise<string> {
 		return new Promise((resolve, reject) => {
 			fs.readFile(filePath, (err, data) => {
