@@ -127,7 +127,8 @@ async function onDecompressEvent(ws: WebSocket, messageObj: { event: string; dat
 		const extension = messageObj.data.filePath.split(".").pop() ?? "";
 		const dispatch: Record<string, (data: { filePath: string }) => Promise<DecompressResponse>> = {
 			"cb7": BooksStore.getInstance().decompressCB7.bind(BooksStore.getInstance()),
-			"cbr": BooksStore.getInstance().decompressRAR.bind(BooksStore.getInstance())
+			"cbr": BooksStore.getInstance().decompressRAR.bind(BooksStore.getInstance()),
+			"cbz": BooksStore.getInstance().decompressZIP.bind(BooksStore.getInstance()),
 		};
 
 		if (dispatch[extension]) {

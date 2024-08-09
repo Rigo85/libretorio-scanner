@@ -208,8 +208,8 @@ export async function updateFile(file: File): Promise<boolean> {
 	}
 }
 
-export async function removeFile(hashes: string[]): Promise<number> {
-	logger.info(`removeFile: parent hashes length="${hashes.length}".`);
+export async function removeFileByParentHash(hashes: string[]): Promise<number> {
+	logger.info(`removeFileByParentHash: parent hashes length="${hashes.length}".`);
 
 	try {
 		const query = `
@@ -222,7 +222,35 @@ export async function removeFile(hashes: string[]): Promise<number> {
 
 		return (removesFiles || []).length;
 	} catch (error) {
-		logger.error(`removeFile parent hashes length="${hashes.length}":`, error.message);
+		logger.error(`removeFileByParentHash parent hashes length="${hashes.length}":`, error.message);
+
+		return 0;
+	}
+}
+
+export async function removeFileByFileHash(hashes: string[]): Promise<number> {
+	logger.info(`removeFileByFileHash: file hashes length="${hashes.length}".`);
+
+	try {
+		const query = `
+			DELETE FROM archive a
+				where encode(digest(
+                     case
+                         when right("parentPath", 1) = '/' then
+                             concat("parentPath", name)
+                         else
+                             concat("parentPath", '/', name)
+                         end
+                 , 'sha256'), 'hex') = ANY($1::text[])
+                 RETURNING a.id;
+			`;
+		const values = [hashes];
+
+		const removesFiles = await executeQuery(query, values);
+
+		return (removesFiles || []).length;
+	} catch (error) {
+		logger.error(`removeFileByFileHash file hashes length="${hashes.length}":`, error.message);
 
 		return 0;
 	}

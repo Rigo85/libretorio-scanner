@@ -9,8 +9,8 @@ import { Logger } from "(src)/helpers/Logger";
 import {
 	getFileHashes,
 	getScanRootByPath,
-	insertFile,
-	removeFile, updateScanRoot
+	insertFile, removeFileByFileHash,
+	removeFileByParentHash, updateScanRoot
 } from "(src)/services/dbService";
 import { Scanner } from "(src)/services/Scanner";
 
@@ -67,11 +67,23 @@ export async function scanCompareUpdate(scanRootPath: string) {
 		const hash = getHashes(scanRootResult.scan.directories);
 
 		// - eliminar los archivos en la db que NO tengan un parentHash dentro de los hashes obtenidos.
-		const removedFilesCount = await removeFile(hash);
-		logger.info(`Removed files: ${removedFilesCount}.`);
+		const removedFilesCount = await removeFileByParentHash(hash);
+		logger.info(`Removed files by parent hash: ${removedFilesCount}.`);
 
 		// - obtener los archivos de la db.
 		const hashes = await getFileHashes(scanRoot.id);
+
+		const fileToRemove = hashes.filter((h: { hash: string }) => {
+			return !scanRootResult.scan.files.find((file: File) => {
+				return h.hash === generateHash(path.join(file.parentPath, file.name), true);
+			});
+		});
+
+		// - eliminar los archivos en la db que NO estén en el scan.
+		if (fileToRemove.length) {
+			const removedFilesCount = await removeFileByFileHash(fileToRemove.map((f: { hash: string }) => f.hash));
+			logger.info(`Removed files by file hash: ${removedFilesCount}.`);
+		}
 
 		// - los archivos del scan que no estén en la db, se insertan.
 		const newFiles = scanRootResult.scan.files.filter((file: File) => {

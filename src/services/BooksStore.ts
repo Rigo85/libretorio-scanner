@@ -6,6 +6,8 @@ import { extractFull } from "node-7z";
 import sharp from "sharp";
 import { exec } from "child_process";
 import util from "util";
+import unzipper from "unzipper";
+import { Base64 } from "js-base64";
 
 import { Logger } from "(src)/helpers/Logger";
 import {
@@ -226,7 +228,8 @@ export class BooksStore {
 	}
 
 	public async decompressCB7(data: { filePath: string; id: string }): Promise<DecompressResponse> {
-		logger.info(`decompressBook: '${JSON.stringify(data)}'`);
+		logger.info(`decompressCB7: '${JSON.stringify(data)}'`);
+
 		let extractPath = "";
 		const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
 		const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
@@ -307,7 +310,7 @@ export class BooksStore {
 	}
 
 	public async decompressRAR(data: { filePath: string; id: string }): Promise<DecompressResponse> {
-		logger.info(`decompressBook: '${JSON.stringify(data)}'`);
+		logger.info(`decompressRAR: '${JSON.stringify(data)}'`);
 
 		try {
 			if (!data?.filePath) {
@@ -370,11 +373,71 @@ export class BooksStore {
 				return {pages, success: "OK"};
 			}
 		} catch (error) {
-			logger.error("decompressBook", error);
+			logger.error("decompressRAR", error);
 
 			return {success: "ERROR", error: error.message || "Error extracting comic/manga book."};
 		}
 	}
+
+	public async decompressZIP(data: { filePath: string; id: string }): Promise<DecompressResponse> {
+		logger.info(`decompressZIP: '${JSON.stringify(data)}'`);
+
+		let extractPath = "";
+		const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
+		const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
+		try {
+			if (fs.existsSync(cacheFilePath)) {
+				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+				return {pages, success: "OK"};
+			} else {
+				extractPath = path.join(__dirname, "extracted");
+				if (!fs.existsSync(extractPath)) {
+					fs.mkdirSync(extractPath);
+				}
+
+				await new Promise<void>((resolve, reject) => {
+					fs.createReadStream(data.filePath)
+						.pipe(unzipper.Extract({path: extractPath}))
+						.on("close", resolve)
+						.on("error", reject);
+				});
+
+				const files = fs.readdirSync(extractPath)
+					.filter(file => /\.(jpg|jpeg|png|webp|gif)$/i.test(file))
+					.sort((a, b) => a.localeCompare(b));
+
+				const base64Images = await Promise.all(files.map(file => {
+					const filePath = path.join(extractPath, file);
+					return this.imageToBase64(filePath);
+				}));
+
+				fs.rmSync(extractPath, {recursive: true});
+
+				this.savePagesToFile(base64Images, data.id);
+
+				return {success: "OK", pages: base64Images};
+			}
+		} catch (error) {
+			logger.error("decompressZIP", error);
+
+			return {success: "ERROR", error: error.message || "Error extracting comic/manga book."};
+		} finally {
+			if (extractPath && fs.existsSync(extractPath)) {
+				fs.rmSync(extractPath, {recursive: true});
+			}
+		}
+	}
+
+	private imageToBase64(filePath: string): Promise<string> {
+		return new Promise((resolve, reject) => {
+			fs.readFile(filePath, (err, data) => {
+				if (err) {
+					return reject(err);
+				}
+				resolve(Base64.fromUint8Array(new Uint8Array(data)));
+			});
+		});
+	};
 
 	private savePagesToFile(pages: any[], id: string): Promise<void> {
 		try {
