@@ -16,6 +16,16 @@ import { Scanner } from "(src)/services/Scanner";
 
 const logger = new Logger("File Utils");
 
+export enum FileKind {
+	/* eslint-disable @typescript-eslint/naming-convention */
+	FILE = "FILE",
+	COMIC_MANGA = "COMIC-MANGA",
+	EPUB = "EPUB",
+	NONE = "NONE"
+	/* eslint-enable @typescript-eslint/naming-convention */
+}
+
+
 export interface File {
 	id?: number;
 	name: string;
@@ -26,6 +36,7 @@ export interface File {
 	localDetails?: string;
 	webDetails?: string;
 	customDetails?: boolean;
+	fileKind: FileKind;
 }
 
 export interface Directory {
@@ -93,6 +104,7 @@ export async function scanCompareUpdate(scanRootPath: string) {
 		});
 
 		logger.info(`New files: ${newFiles.length}.`);
+		logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
 
 		for (const file of newFiles) {
 			const _file = await fillFileDetails(file);
