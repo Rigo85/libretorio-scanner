@@ -2,7 +2,7 @@ import { WebSocket } from "ws";
 
 import { Logger } from "(src)/helpers/Logger";
 import { BooksStore } from "(src)/services/BooksStore";
-import { ConvertToPdfResponse, DecompressResponse } from "(src)/helpers/FileUtils";
+import { ConvertToPdfResponse, DecompressResponse, FileKind } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Book Service");
 
@@ -125,12 +125,16 @@ async function onConvertToPdfEvent(ws: WebSocket, messageObj: { event: string; d
 async function onDecompressEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
 	try {
 		// const extension = messageObj.data.filePath.split(".").pop() ?? "";
-		const extension = BooksStore.getInstance().detectCompressionType(messageObj.data.filePath);
+		const extension = messageObj.data.fileKind === FileKind.FILE ?
+			BooksStore.getInstance().detectCompressionType(messageObj.data.filePath) :
+			messageObj.data.fileKind.toLowerCase();
 
 		const dispatch: Record<string, (data: { filePath: string }) => Promise<DecompressResponse>> = {
 			"cb7": BooksStore.getInstance().decompressCB7.bind(BooksStore.getInstance()),
 			"cbr": BooksStore.getInstance().decompressRAR.bind(BooksStore.getInstance()),
-			"cbz": BooksStore.getInstance().decompressZIP.bind(BooksStore.getInstance())
+			"cbz": BooksStore.getInstance().decompressZIP.bind(BooksStore.getInstance()),
+			// eslint-disable-next-line @typescript-eslint/naming-convention
+			"comic-manga": BooksStore.getInstance().gettingComicMangaImages.bind(BooksStore.getInstance())
 		};
 
 		if (dispatch[extension]) {

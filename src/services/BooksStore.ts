@@ -279,6 +279,41 @@ export class BooksStore {
 		}
 	}
 
+	public async gettingComicMangaImages(data: { filePath: string; id: string }): Promise<DecompressResponse> {
+		logger.info(`gettingComicMangaImages: '${JSON.stringify(data)}'`);
+
+		try {
+			if (!data?.filePath) {
+				logger.info("The path to the Comic/Manga file has not been provided.");
+				return {error: "The path to the Comic/Manga file has not been provided.", success: "ERROR"};
+			}
+
+			if (!fs.existsSync(data.filePath)) {
+				logger.info(`The Comic/Manga file does not exist: "${data.filePath}"`);
+				return {error: `The Comic/Manga file does not exist: "${data.filePath}"`, success: "ERROR"};
+			}
+
+			const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
+			const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
+
+			if (fs.existsSync(cacheFilePath)) {
+				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+				return {pages, success: "OK"};
+			} else {
+				let images = await this.findImagesInDirectory(data.filePath);
+				images = images.sort((a, b) => a.path.localeCompare(b.path)).map(img => img.base64);
+
+				this.savePagesToFile(images, data.id);
+
+				return {success: "OK", pages: images};
+			}
+		} catch (error) {
+			logger.error("gettingComicMangaImages", error);
+
+			return {success: "ERROR", error: error.message || "Error getting comic/manga book."};
+		}
+	}
+
 	private async findImagesInDirectory(dir: string): Promise<any[]> {
 		let images: any[] = [];
 		const files = fs.readdirSync(dir);
