@@ -235,7 +235,7 @@ export class Scanner {
 				}
 			}
 
-			return FileKind.COMIC_MANGA;
+			return files.length ? FileKind.COMIC_MANGA : FileKind.NONE;
 		} catch (error) {
 			logger.error("scanForComics - Error reading directory:", error);
 
