@@ -12,7 +12,7 @@ import { Base64 } from "js-base64";
 import { Logger } from "(src)/helpers/Logger";
 import {
 	getFiles,
-	getFilesByText,
+	getFilesByText, getFilesCount,
 	getScanRoots,
 	insertFile,
 	insertScanRoot,
@@ -125,8 +125,8 @@ export class BooksStore {
 		logger.info("Done updating books info");
 	}
 
-	public async getBooksList(parentHash?: string): Promise<ScanResult> {
-		logger.info("getBooksList:", parentHash ?? "root");
+	public async getBooksList(offset: number, limit: number, parentHash?: string): Promise<ScanResult> {
+		logger.info("getBooksList:", {parentHash: parentHash ?? "root", offset, limit});
 
 		try {
 			const scanRoots = await getScanRoots();
@@ -137,9 +137,12 @@ export class BooksStore {
 			}
 
 			const directories = JSON.parse(scanRoots[0].directories) as Directory;
-			const files = await getFiles(parentHash ?? directories.hash);
+			// const files = await getFiles(parentHash ?? directories.hash, offset, limit);
+			// const total = await getFilesCount(parentHash ?? directories.hash);
+			const [files, total] = await Promise.all([
+				getFiles(parentHash ?? directories.hash, offset, limit), getFilesCount(parentHash ?? directories.hash)]);
 
-			return {directories, files};
+			return {directories, files, total};
 		} catch (error) {
 			logger.error("getBooksList", error);
 

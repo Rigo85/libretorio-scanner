@@ -12,6 +12,7 @@ const logger = new Logger("Scanner");
 export interface ScanResult {
 	directories: Directory;
 	files: File[];
+	total?: number;
 }
 
 export interface ScanRootResult {

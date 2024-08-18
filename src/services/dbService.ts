@@ -283,12 +283,12 @@ export async function getFileHashes(scanRootId: number): Promise<{ hash: string 
 	}
 }
 
-export async function getFiles(parentHash: string): Promise<File[]> {
+export async function getFiles(parentHash: string, offset: number, limit: number): Promise<File[]> {
 	try {
 		const query = `
-		SELECT * FROM archive a WHERE a."parentHash" = $1
+		SELECT * FROM archive a WHERE a."parentHash" = $1 ORDER BY a.id ASC OFFSET $2 LIMIT $3
 		`;
-		const values = [parentHash];
+		const values = [parentHash, offset, limit];
 		const rows = await executeQuery(query, values);
 
 		return rows || [];
@@ -296,6 +296,22 @@ export async function getFiles(parentHash: string): Promise<File[]> {
 		logger.error("getFiles", error.message);
 
 		return [];
+	}
+}
+
+export async function getFilesCount(parentHash: string): Promise<number> {
+	try {
+		const query = `
+		SELECT COUNT(*) AS count FROM archive a WHERE a."parentHash" = $1
+		`;
+		const values = [parentHash];
+		const rows = await executeQuery(query, values);
+
+		return rows?.length ? rows[0].count : 0;
+	} catch (error) {
+		logger.error("getFilesCount", error.message);
+
+		return 0;
 	}
 }
 
