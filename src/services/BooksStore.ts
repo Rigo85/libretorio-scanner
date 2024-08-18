@@ -444,16 +444,21 @@ export class BooksStore {
 					.filter(file => /\.(jpg|jpeg|png|webp|gif)$/i.test(file))
 					.sort((a, b) => a.localeCompare(b));
 
-				const base64Images = await Promise.all(files.map(file => {
+				const pages = [] as any[];
+				for (const file of files) {
+					const fileExtension = path.extname(file).toLowerCase();
 					const filePath = path.join(extractPath, file);
-					return this.imageToBase64(filePath);
-				}));
+					const imageBuffer = await sharp(filePath).toBuffer();
+					const base64Image = imageBuffer.toString("base64");
+					const base64 = `data:image/${fileExtension.slice(1)};base64,${base64Image}`;
+					pages.push(base64);
+				}
 
 				fs.rmSync(extractPath, {recursive: true});
 
-				this.savePagesToFile(base64Images, data.id);
+				this.savePagesToFile(pages, data.id);
 
-				return {success: "OK", pages: base64Images};
+				return {success: "OK", pages};
 			}
 		} catch (error) {
 			logger.error("decompressZIP", error);
