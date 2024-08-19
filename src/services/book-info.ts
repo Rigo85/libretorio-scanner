@@ -6,52 +6,52 @@ import { Logger } from "(src)/helpers/Logger";
 
 const logger = new Logger("Book Info");
 
-const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+// const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+//
+// if (!apiKey) {
+// 	logger.error("The environment variable 'GOOGLE_BOOKS_API_KEY' is not defined.");
+// 	throw new Error("The environment variable 'GOOGLE_BOOKS_API_KEY' is not defined.");
+// }
 
-if (!apiKey) {
-	logger.error("The environment variable 'GOOGLE_BOOKS_API_KEY' is not defined.");
-	throw new Error("The environment variable 'GOOGLE_BOOKS_API_KEY' is not defined.");
-}
-
-export async function getBookInfoGoogleBooks(_title: string) {
-	const title = _title.trim();
-	const url: string = "https://www.googleapis.com/books/v1/volumes";
-
-	if (!title) {
-		logger.error("getBookInfoGoogleBooks: Title is empty");
-		return undefined;
-	}
-
-	// logger.info(`getBookInfoGoogleBooks: ${title}`);
-
-	try {
-		const response = await axios.get(url, {
-			params: {
-				q: `intitle:${title}`,
-				key: apiKey
-			}
-		}) as AxiosResponse;
-
-		if (response.data.items) {
-			const bookInfo = response.data.items[0].volumeInfo;
-			const info = {
-				title: bookInfo.title,
-				authors: bookInfo.authors,
-				publishedDate: bookInfo.publishedDate,
-				isbn: bookInfo.industryIdentifiers ? bookInfo.industryIdentifiers[0].identifier : "N/A",
-				cover: bookInfo.imageLinks ? bookInfo.imageLinks.thumbnail : "N/A"
-			};
-
-			// logger.info("getBookInfoGoogleBooks", info);
-
-			return bookInfo;
-		}
-	} catch (error) {
-		logger.error("getBookInfoGoogleBooks", {code: error.code, message: error.message});
-	}
-
-	return undefined;
-}
+// export async function getBookInfoGoogleBooks(_title: string) {
+// 	const title = _title.trim();
+// 	const url: string = "https://www.googleapis.com/books/v1/volumes";
+//
+// 	if (!title) {
+// 		logger.error("getBookInfoGoogleBooks: Title is empty");
+// 		return undefined;
+// 	}
+//
+// 	// logger.info(`getBookInfoGoogleBooks: ${title}`);
+//
+// 	try {
+// 		const response = await axios.get(url, {
+// 			params: {
+// 				q: `intitle:${title}`,
+// 				key: apiKey
+// 			}
+// 		}) as AxiosResponse;
+//
+// 		if (response.data.items) {
+// 			const bookInfo = response.data.items[0].volumeInfo;
+// 			const info = {
+// 				title: bookInfo.title,
+// 				authors: bookInfo.authors,
+// 				publishedDate: bookInfo.publishedDate,
+// 				isbn: bookInfo.industryIdentifiers ? bookInfo.industryIdentifiers[0].identifier : "N/A",
+// 				cover: bookInfo.imageLinks ? bookInfo.imageLinks.thumbnail : "N/A"
+// 			};
+//
+// 			// logger.info("getBookInfoGoogleBooks", info);
+//
+// 			return bookInfo;
+// 		}
+// 	} catch (error) {
+// 		logger.error("getBookInfoGoogleBooks", {code: error.code, message: error.message});
+// 	}
+//
+// 	return undefined;
+// }
 
 export async function searchBookInfoOpenLibrary(title: string, author: string): Promise<any[]> {
 	const url = "https://openlibrary.org/search.json";
