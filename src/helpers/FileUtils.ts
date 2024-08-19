@@ -48,7 +48,15 @@ export interface Directory {
 export interface DecompressResponse {
 	success: "OK" | "ERROR";
 	error?: string;
-	pages?: any[];
+	pages?: DecompressPages;
+}
+
+export interface DecompressPages {
+	pages: any[];
+	pageIndex: number;
+	currentPagesLength: number;
+	totalPages: number;
+	index: number;
 }
 
 export interface ConvertToPdfResponse {

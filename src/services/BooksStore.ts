@@ -24,7 +24,7 @@ import { FileWatcher } from "(src)/services/FileWatcher";
 import {
 	checkIfPathExistsAndIsFile,
 	ConventToPdfUtilFunction,
-	ConvertToPdfResponse,
+	ConvertToPdfResponse, DecompressPages,
 	DecompressResponse,
 	Directory,
 	File,
@@ -234,9 +234,20 @@ export class BooksStore {
 		logger.info(`decompressCB7: '${JSON.stringify(data)}'`);
 
 		let extractPath = "";
-		const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
-		const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
 		try {
+			if (!data?.filePath) {
+				logger.info("The path to the 7z file has not been provided.");
+				return {error: "The path to the Comic/Manga file has not been provided.", success: "ERROR"};
+			}
+
+			if (!fs.existsSync(data.filePath)) {
+				logger.info(`The 7z file does not exist: "${data.filePath}"`);
+				return {error: `The Comic/Manga file does not exist: "${data.filePath}"`, success: "ERROR"};
+			}
+
+			const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
+			const cacheFilePath = path.join(cachePath, `${data.id}_0.cache`);
+
 			if (fs.existsSync(cacheFilePath)) {
 				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
 				return {pages, success: "OK"};
@@ -267,9 +278,14 @@ export class BooksStore {
 
 				fs.rmSync(extractPath, {recursive: true});
 
-				this.savePagesToFile(images, data.id);
+				await this.savePagesToFile(images, data.id);
 
-				return {success: "OK", pages: images};
+				if (fs.existsSync(cacheFilePath)) {
+					const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+					return {pages, success: "OK"};
+				} else {
+					return {success: "ERROR", error: "Error extracting comic/manga book."};
+				}
 			}
 		} catch (error) {
 			logger.error("decompressCB7", error);
@@ -297,7 +313,7 @@ export class BooksStore {
 			}
 
 			const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
-			const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
+			const cacheFilePath = path.join(cachePath, `${data.id}_0.cache`);
 
 			if (fs.existsSync(cacheFilePath)) {
 				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
@@ -306,9 +322,14 @@ export class BooksStore {
 				let images = await this.findImagesInDirectory(data.filePath);
 				images = images.sort((a, b) => a.path.localeCompare(b.path)).map(img => img.base64);
 
-				this.savePagesToFile(images, data.id);
+				await this.savePagesToFile(images, data.id);
 
-				return {success: "OK", pages: images};
+				if (fs.existsSync(cacheFilePath)) {
+					const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+					return {pages, success: "OK"};
+				} else {
+					return {success: "ERROR", error: "Error extracting comic/manga book."};
+				}
 			}
 		} catch (error) {
 			logger.error("gettingComicMangaImages", error);
@@ -362,7 +383,7 @@ export class BooksStore {
 			}
 
 			const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
-			const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
+			const cacheFilePath = path.join(cachePath, `${data.id}_0.cache`);
 
 			if (fs.existsSync(cacheFilePath)) {
 				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
@@ -401,14 +422,20 @@ export class BooksStore {
 					pages.push(..._pages
 						.filter((file) => file.extraction)
 						.map((file) => {
-							return `data:image/${this.getImageFormat(file.fileHeader.name)};base64,${Buffer.from(file.extraction).toString("base64")}`;
+							const fileExtension = path.extname(file.fileHeader.name).toLowerCase();
+							return `data:image/${fileExtension.slice(1)};base64,${Buffer.from(file.extraction).toString("base64")}`;
 						}))
 					;
 				}
 
-				this.savePagesToFile(pages, data.id);
+				await this.savePagesToFile(pages, data.id);
 
-				return {pages, success: "OK"};
+				if (fs.existsSync(cacheFilePath)) {
+					const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+					return {pages, success: "OK"};
+				} else {
+					return {success: "ERROR", error: "Error extracting comic/manga book."};
+				}
 			}
 		} catch (error) {
 			logger.error("decompressRAR", error);
@@ -421,9 +448,20 @@ export class BooksStore {
 		logger.info(`decompressZIP: '${JSON.stringify(data)}'`);
 
 		let extractPath = "";
-		const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
-		const cacheFilePath = path.join(cachePath, `${data.id}.cache`);
 		try {
+			if (!data?.filePath) {
+				logger.info("The path to the ZIP file has not been provided.");
+				return {error: "The path to the Comic/Manga file has not been provided.", success: "ERROR"};
+			}
+
+			if (!fs.existsSync(data.filePath)) {
+				logger.info(`The ZIP file does not exist: "${data.filePath}"`);
+				return {error: `The Comic/Manga file does not exist: "${data.filePath}"`, success: "ERROR"};
+			}
+
+			const cachePath = path.join(__dirname, "..", "public", "cache", data.id);
+			const cacheFilePath = path.join(cachePath, `${data.id}_0.cache`);
+
 			if (fs.existsSync(cacheFilePath)) {
 				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
 				return {pages, success: "OK"};
@@ -456,9 +494,14 @@ export class BooksStore {
 
 				fs.rmSync(extractPath, {recursive: true});
 
-				this.savePagesToFile(pages, data.id);
+				await this.savePagesToFile(pages, data.id);
 
-				return {success: "OK", pages};
+				if (fs.existsSync(cacheFilePath)) {
+					const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+					return {pages, success: "OK"};
+				} else {
+					return {success: "ERROR", error: "Error extracting comic/manga book."};
+				}
 			}
 		} catch (error) {
 			logger.error("decompressZIP", error);
@@ -504,33 +547,58 @@ export class BooksStore {
 		}
 	}
 
-	private imageToBase64(filePath: string): Promise<string> {
-		return new Promise((resolve, reject) => {
-			fs.readFile(filePath, (err, data) => {
-				if (err) {
-					return reject(err);
-				}
-				resolve(Base64.fromUint8Array(new Uint8Array(data)));
-			});
-		});
-	};
-
-	private savePagesToFile(pages: any[], id: string): Promise<void> {
+	private savePagesToFile(pages: any[], id: string, sizeThreshold: number = 10 * 1024 * 1024): Promise<void> {
 		try {
 			const cachePath = path.join(__dirname, "..", "public", "cache", id);
-			const cacheFilePath = path.join(cachePath, `${id}.cache`);
 			fs.mkdirSync(cachePath, {recursive: true});
-			return fs.writeFile(cacheFilePath, JSON.stringify(pages));
+
+			let currentSize = 0;
+			let fileIndex = 0;
+			let currentBatch: any[] = [];
+			let pageIndex = 1;
+
+			for (const page of pages) {
+				const pageSize = Buffer.byteLength(JSON.stringify(page), "utf8");
+				if (currentSize + pageSize > sizeThreshold && currentBatch.length) {
+					// Save the current batch to a new file
+					const cacheFilePath = path.join(cachePath, `${id}_${fileIndex}.cache`);
+					fs.writeFileSync(
+						cacheFilePath,
+						JSON.stringify({
+							pages: currentBatch,
+							pageIndex,
+							currentPagesLength: currentBatch.length,
+							totalPages: pages.length,
+							index: fileIndex
+						})
+					);
+					pageIndex += currentBatch.length;
+					fileIndex++;
+					currentBatch = [];
+					currentSize = 0;
+				}
+				currentBatch.push(page);
+				currentSize += pageSize;
+			}
+
+			// Save the last batch if any
+			if (currentBatch.length > 0) {
+				const cacheFilePath = path.join(cachePath, `${id}_${fileIndex}.cache`);
+				fs.writeFileSync(
+					cacheFilePath,
+					JSON.stringify({
+						pages: currentBatch,
+						pageIndex,
+						currentPagesLength: currentBatch.length,
+						totalPages: pages.length,
+						index: fileIndex
+					})
+				);
+			}
+
+			return Promise.resolve();
 		} catch (error) {
 			logger.error("savePagesToFile", error);
-		}
-	}
-
-	private getImageFormat(fileName: string): string {
-		if (fileName.endsWith(".png")) {
-			return "png";
-		} else {
-			return "jpeg";
 		}
 	}
 
@@ -611,6 +679,37 @@ export class BooksStore {
 			logger.error("convertToPdf", error);
 
 			return {success: "ERROR", error: error.message || "An error has occurred converting to pdf."};
+		}
+	}
+
+	async getMorePages(id: string, index: number): Promise<DecompressResponse> {
+		logger.info(`getMorePages: '${id}', '${index}'`);
+
+		try {
+			if (!id) {
+				logger.info("The Comic/Manga ID has not been provided.");
+				return {error: "The Comic/Manga ID has not been provided.", success: "ERROR"};
+			}
+
+			if (index === undefined) {
+				logger.info("The Comic/Manga cache index has not been provided.");
+				return {error: "The Comic/Manga cache index has not been provided.", success: "ERROR"};
+			}
+
+			const cachePath = path.join(__dirname, "..", "public", "cache", id);
+			const cacheFilePath = path.join(cachePath, `${id}_${index}.cache`);
+
+			if (fs.existsSync(cacheFilePath)) {
+				const pages = JSON.parse(fs.readFileSync(cacheFilePath).toString());
+				return {pages, success: "OK"};
+			} else {
+				logger.error(`The Comic/Manga cache file does not exist: "${cacheFilePath}"`);
+				return {success: "ERROR", error: "Error getting more pages."};
+			}
+		} catch (error) {
+			logger.error("getMorePages", error);
+
+			return {success: "ERROR", error: error.message || "Error getting more pages."};
 		}
 	}
 }

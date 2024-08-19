@@ -38,6 +38,10 @@ export function onMessageEvent(message: any, ws: WebSocket) {
 		"convert_to_pdf": async () => {
 			await onConvertToPdfEvent(ws, messageObj);
 		},
+		// eslint-disable-next-line @typescript-eslint/naming-convention
+		"get_more_pages": async () => {
+			await onGetMorePagesEvent(ws, messageObj);
+		},
 		"default": async () => {
 			ws.send("{\"event\":\"errors\", \"data\": {\"errors\":[\"An error has occurred. Invalid event kind.\"]}}");
 		}
@@ -151,6 +155,20 @@ async function onDecompressEvent(ws: WebSocket, messageObj: { event: string; dat
 		}
 	} catch (error) {
 		logger.error("onDecompressEvent", error);
+
+		sendMessage(ws, {
+			event: "decompress",
+			data: {success: "ERROR", error: "An error has occurred."}
+		});
+	}
+}
+
+async function onGetMorePagesEvent(ws: WebSocket, messageObj: { event: string; data: any }) {
+	try {
+		const response = await BooksStore.getInstance().getMorePages(messageObj?.data?.id, messageObj?.data?.index);
+		sendMessage(ws, {event: "decompress", data: {...response}});
+	} catch (error) {
+		logger.error("onGetMorePagesEvent", error);
 
 		sendMessage(ws, {
 			event: "decompress",
