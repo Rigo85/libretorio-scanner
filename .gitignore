@@ -40,3 +40,4 @@ test.json
 desktop.ini
 
 coverage/*
+src/browser

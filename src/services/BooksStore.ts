@@ -7,7 +7,6 @@ import sharp from "sharp";
 import { exec } from "child_process";
 import util from "util";
 import unzipper from "unzipper";
-import { Base64 } from "js-base64";
 
 import { Logger } from "(src)/helpers/Logger";
 import {
@@ -24,8 +23,7 @@ import { FileWatcher } from "(src)/services/FileWatcher";
 import {
 	checkIfPathExistsAndIsFile,
 	ConventToPdfUtilFunction,
-	ConvertToPdfResponse, DecompressPages,
-	DecompressResponse,
+	ConvertToPdfResponse, DecompressResponse,
 	Directory,
 	File,
 	fillFileDetails,
@@ -36,7 +34,8 @@ import { searchBookInfoOpenLibrary } from "(src)/services/book-info";
 const execPromise = util.promisify(exec);
 const logger = new Logger("Books Store");
 
-const envScanRoot = process.env.SCAN_ROOT;
+// const envScanRoot = process.env.SCAN_ROOT;
+const envScanRoot = path.join(__dirname, "..", "public", "books");
 
 if (!envScanRoot) {
 	throw new Error("The environment variable 'SCAN_ROOT' is not defined.");
@@ -683,7 +682,7 @@ export class BooksStore {
 	}
 
 	async getMorePages(id: string, index: number): Promise<DecompressResponse> {
-		logger.info(`getMorePages: '${id}', '${index}'`);
+		// logger.info(`getMorePages: '${id}', '${index}'`);
 
 		try {
 			if (!id) {

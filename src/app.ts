@@ -3,14 +3,13 @@ import * as dotenv from "dotenv";
 dotenv.config({path: ".env"});
 
 import express from "express";
-import { Request, Response, NextFunction } from "express";
 import compression from "compression";
 import lusca from "lusca";
 import helmet from "helmet";
 import cors from "cors";
 import path from "path";
+import fs from "fs-extra";
 
-import { AppRoutes } from "./routes";
 import { BooksStore } from "(src)/services/BooksStore";
 import { Logger } from "(src)/helpers/Logger"; // Routes file
 
@@ -29,13 +28,19 @@ app.use(lusca.xssProtection(true));
 app.use(helmet());
 app.use(cors());
 
-AppRoutes.forEach(route => {
-	(app as any)[route.method](route.path, (request: Request, response: Response, next: NextFunction) => {
-		route.action(request, response, next)
-			.then(() => next)
-			.catch((err: any) => next(err));
-	});
+app.get("/*", function (req, res, next) {
+	if (/\.[^\/]+$/.test(req.path)) {
+		const filePath = path.join(__dirname, "public", req.path);
+		if (fs.pathExistsSync(filePath)) {
+			res.sendFile(filePath);
+		} else {
+			res.status(404).send("Not Found");
+		}
+	} else {
+		res.sendFile(path.join(__dirname, "public", "index.html"));
+	}
 });
+
 
 BooksStore.getInstance().updateBooksInfo()
 	.catch((error) => {
