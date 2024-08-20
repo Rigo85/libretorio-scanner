@@ -13,7 +13,7 @@
 - **Construir la imagen**:
   - `docker build -t libretorio .` 
 - **Ejecutar contenedor con la imagen creada**:
-  - `docker run -d -p 80:3000 --env-file=./.env-docker --name libretorio --network mi-red --restart unless-stopped \
+  - `docker run -d -p 80:80 --env-file=./.env-docker --name libretorio --network mi-red --restart unless-stopped \
   -v /media/RIGO7/BACKUP/LIBROS:/app/dist/public/books \
   -v /media/RIGO7/Libretorio-conf/cache:/app/dist/public/cache \
   -v /media/RIGO7/Libretorio-conf/covers:/app/dist/public/covers \
