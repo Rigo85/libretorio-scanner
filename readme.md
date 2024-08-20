@@ -11,7 +11,7 @@
 - **Desplegar el PostgreSQL**
   - Revisar *Libretorio-posgresql*.
 - **Construir la imagen**:
-  - `docker build --progress=plain -t libretorio .` 
+  - `docker build -t libretorio .` 
 - **Ejecutar contenedor con la imagen creada**:
   - `docker run -d -p 80:3000 --env-file=./.env-docker --name libretorio --network mi-red --restart unless-stopped \
   -v /media/RIGO7/BACKUP/LIBROS:/app/dist/public/books \
