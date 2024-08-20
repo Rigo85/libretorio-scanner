@@ -33,7 +33,7 @@ process.on("unhandledRejection", (reason, promise) => {
 	logger.error("Unhandled Rejection:", reason);
 });
 
-const port = parseInt(process.env.PORT || "3005");
+const port = parseInt(process.env.PORT || "3000");
 const server = new WSServer(app);
 
 server.listen(port);
