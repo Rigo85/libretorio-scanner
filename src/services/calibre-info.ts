@@ -42,7 +42,13 @@ function parseMeta(metadata: any): any {
 	metaLines.forEach((line: string) => {
 		const [key, ...value] = line.split(":");
 		if (key && value.length > 0) {
-			metaObj[key.trim().toLowerCase()] = value.join(":").trim();
+			metaObj[key.trim().toLowerCase()] =
+				value.join(":").trim()
+					.replace(/\\u0000/g, "") // Eliminar caracteres nulos
+					.replace(/\n/g, "")      // Eliminar saltos de línea
+					.replace(/\r/g, "")      // Eliminar retornos de carro
+					.replace(/\t/g, "")      // Eliminar tabulaciones
+					.replace(/[\x00-\x1F\x7F]/g, ""); // Eliminar otros caracteres de control
 		}
 	});
 	return metaObj;
