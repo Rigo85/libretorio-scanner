@@ -42,7 +42,7 @@ RUN npm install
 RUN npm run build
 
 # Exponer el puerto en el que se ejecutará la aplicación
-EXPOSE 80
+EXPOSE 3005
 
 # Comando para ejecutar la aplicación
 CMD ["node", "dist/server.js"]
