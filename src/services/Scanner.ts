@@ -214,7 +214,7 @@ export class Scanner {
 				const stat = fs.statSync(filePath);
 
 				if (!stat.isFile()) {
-					logger.error(`scanForComics - "${filePath}" is not a file.`);
+					// logger.error(`scanForComics - "${filePath}" is not a file.`);
 
 					return FileKind.NONE; // No es un archivo
 				}
@@ -222,7 +222,7 @@ export class Scanner {
 				const extension = path.extname(file).toLowerCase().slice(1);
 
 				if (!allowedExtensions.has(extension)) {
-					logger.error(`scanForComics - "${file}" has an invalid extension.`);
+					// logger.error(`scanForComics - "${file}" has an invalid extension.`);
 
 					return FileKind.NONE; // Extensión no permitida
 				}
@@ -230,7 +230,7 @@ export class Scanner {
 				if (!foundExtension) {
 					foundExtension = extension;
 				} else if (foundExtension !== extension) {
-					logger.error(`scanForComics - "${file}" has a different extension of "${foundExtension || "none"}".`);
+					// logger.error(`scanForComics - "${file}" has a different extension of "${foundExtension || "none"}".`);
 
 					return FileKind.NONE; // Las extensiones no coinciden
 				}
@@ -249,13 +249,13 @@ export class Scanner {
 			// 1. Verificar el archivo mimetype
 			const mimetypePath = path.join(directoryPath, "mimetype");
 			if (!fs.existsSync(mimetypePath)) {
-				logger.error(`scanForEpubs - "${mimetypePath}" does not exist.`);
+				// logger.error(`scanForEpubs - "${mimetypePath}" does not exist.`);
 
 				return FileKind.NONE;
 			}
 			const mimetypeContent = fs.readFileSync(mimetypePath, "utf-8").trim();
 			if (mimetypeContent !== "application/epub+zip") {
-				logger.error(`scanForEpubs - "${mimetypePath}" has an invalid content.`);
+				// logger.error(`scanForEpubs - "${mimetypePath}" has an invalid content.`);
 
 				return FileKind.NONE;
 			}
@@ -264,7 +264,7 @@ export class Scanner {
 			const metaInfPath = path.join(directoryPath, "META-INF");
 			const containerXmlPath = path.join(metaInfPath, "container.xml");
 			if (!fs.existsSync(containerXmlPath)) {
-				logger.error(`scanForEpubs - "${containerXmlPath}" does not exist.`);
+				// logger.error(`scanForEpubs - "${containerXmlPath}" does not exist.`);
 
 				return FileKind.NONE;
 			}
@@ -282,20 +282,20 @@ export class Scanner {
 					return FileKind.NONE; // Fallar si no se encuentra la ruta al OPF
 				}
 			} catch (error) {
-				logger.error(`scanForEpubs - Error parsing "${containerXmlPath}":`, error);
+				// logger.error(`scanForEpubs - Error parsing "${containerXmlPath}":`, error);
 
 				return FileKind.NONE;
 			}
 
 			// 4. Verificar la existencia del archivo .opf
 			if (!opfFilePath) {
-				logger.error(`scanForEpubs - "${containerXmlPath}" does not contain a valid .opf file path.`);
+				// logger.error(`scanForEpubs - "${containerXmlPath}" does not contain a valid .opf file path.`);
 				return FileKind.NONE;
 			}
 
 			const opfAbsolutePath = path.join(directoryPath, opfFilePath);
 			if (!fs.existsSync(opfAbsolutePath)) {
-				logger.error(`scanForEpubs - "${opfAbsolutePath}" does not exist.`);
+				// logger.error(`scanForEpubs - "${opfAbsolutePath}" does not exist.`);
 
 				return FileKind.NONE;
 			}
