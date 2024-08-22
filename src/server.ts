@@ -10,7 +10,6 @@ import errorHandler from "errorhandler";
 
 import { Logger } from "(src)/helpers/Logger";
 
-import { WSServer } from "(src)/WSServer";
 import { app } from "./app";
 
 const logger = new Logger("server");
@@ -33,7 +32,7 @@ process.on("unhandledRejection", (reason, promise) => {
 	logger.error("Unhandled Rejection:", reason);
 });
 
-const port = parseInt(process.env.PORT || "3000");
-const server = new WSServer(app);
-
-server.listen(port);
+const port = parseInt(process.env.PORT || "3006");
+app.listen(port, () => {
+	logger.success(`Server running on port ${port} in ${process.env.NODE_ENV} mode`);
+});

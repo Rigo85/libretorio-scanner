@@ -1,7 +1,7 @@
 {
-    "name": "libretorio",
+    "name": "libretorio-scanner",
     "version": "1.0.0",
-    "description": "(Sarcasm) A grandiose TypeScript/Node.js miracle worker designed to somehow manage your ever-growing hoard of books, comics, manga, and any other reading material you can throw at it. It claims to catalog, search, sort, and track your reading progress with the precision of a hyperactive librarian. Perfect for those who believe they can tame their literary chaos with a few lines of code and a lot of wishful thinking.",
+    "description": "This service monitors a directory for changes and updates the database accordingly, ensuring real-time synchronization and data accuracy.",
     "scripts": {
         "test": "jest",
         "start": "npm run serve",

@@ -2,7 +2,7 @@ import * as dotenv from "dotenv";
 
 dotenv.config({path: ".env"});
 
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import compression from "compression";
 import lusca from "lusca";
 import helmet from "helmet";
@@ -10,6 +10,7 @@ import cors from "cors";
 import path from "path";
 import fs from "fs-extra";
 
+import { AppRoutes } from "./routes";
 import { BooksStore } from "(src)/services/BooksStore";
 import { Logger } from "(src)/helpers/Logger"; // Routes file
 
@@ -41,6 +42,13 @@ app.get("/*", function (req, res, next) {
 	}
 });
 
+AppRoutes.forEach(route => {
+	(app as any)[route.method](route.path, (request: Request, response: Response, next: NextFunction) => {
+		route.action(request, response, next)
+			.then(() => next)
+			.catch((err: any) => next(err));
+	});
+});
 
 BooksStore.getInstance().updateBooksInfo()
 	.catch((error) => {

@@ -45,12 +45,6 @@ export interface Directory {
 	directories: Directory[];
 }
 
-export interface DecompressResponse {
-	success: "OK" | "ERROR";
-	error?: string;
-	pages?: DecompressPages;
-}
-
 export interface DecompressPages {
 	pages: any[];
 	pageIndex: number;
@@ -58,14 +52,6 @@ export interface DecompressPages {
 	totalPages: number;
 	index: number;
 }
-
-export interface ConvertToPdfResponse {
-	success: "OK" | "ERROR";
-	error?: string;
-	pdfPath?: string;
-}
-
-export type ConventToPdfUtilFunction = (filePath: string, coverId: string) => Promise<void>;
 
 export async function scanCompareUpdate(scanRootPath: string) {
 	logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);

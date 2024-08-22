@@ -61,27 +61,6 @@ export async function getScanRootByPath(path: string): Promise<ScanRoot> {
 	}
 }
 
-export async function getScanRoot(scanRootId: number): Promise<ScanRoot> {
-	logger.info("getScanRoot by id:", scanRootId);
-
-	try {
-		const query = "SELECT * FROM scan_root WHERE id = $1";
-		const rows = await executeQuery(query, [scanRootId]);
-
-		if (!rows?.length) {
-			logger.error(`Scan root with id "${scanRootId}" not found.`);
-
-			return undefined;
-		}
-
-		return rows[0];
-	} catch (error) {
-		logger.error("getScanRoot", error.message);
-
-		return undefined;
-	}
-}
-
 export async function getScanRoots(): Promise<ScanRoot[]> {
 	logger.info("getScanRoots");
 
@@ -182,32 +161,6 @@ export async function insertFile(file: File, scanRootId: number): Promise<number
 	}
 }
 
-export async function updateFile(file: File): Promise<boolean> {
-	logger.info(`updateFile: "${file.name}"`);
-
-	try {
-		const query = `
-			UPDATE archive SET "webDetails" = $1, "customDetails" = $2
-			WHERE id = $3
-			RETURNING id
-		`;
-		const values = [file.webDetails, file.customDetails ?? false, file.id];
-		const rows = await executeQuery(query, values);
-
-		if (!rows?.length) {
-			logger.error(`Error updating file: "${file.name}".`);
-
-			return false;
-		}
-
-		return true;
-	} catch (error) {
-		logger.error(`updateFile "${file.name}":`, error.message);
-
-		return false;
-	}
-}
-
 export async function removeFileByParentHash(hashes: string[]): Promise<number> {
 	logger.info(`removeFileByParentHash: parent hashes length="${hashes.length}".`);
 
@@ -278,59 +231,6 @@ export async function getFileHashes(scanRootId: number): Promise<{ hash: string 
 		return hashes || [];
 	} catch (error) {
 		logger.error(`getFileHashes "${scanRootId}":`, error.message);
-
-		return [];
-	}
-}
-
-export async function getFiles(parentHash: string, offset: number, limit: number): Promise<File[]> {
-	try {
-		const query = `
-		SELECT * FROM archive a WHERE a."parentHash" = $1 ORDER BY a.id ASC OFFSET $2 LIMIT $3
-		`;
-		const values = [parentHash, offset, limit];
-		const rows = await executeQuery(query, values);
-
-		return rows || [];
-	} catch (error) {
-		logger.error("getFiles", error.message);
-
-		return [];
-	}
-}
-
-export async function getFilesCount(parentHash: string): Promise<number> {
-	try {
-		const query = `
-		SELECT COUNT(*) AS count FROM archive a WHERE a."parentHash" = $1
-		`;
-		const values = [parentHash];
-		const rows = await executeQuery(query, values);
-
-		return rows?.length ? rows[0].count : 0;
-	} catch (error) {
-		logger.error("getFilesCount", error.message);
-
-		return 0;
-	}
-}
-
-export async function getFilesByText(searchText: string): Promise<File[]> {
-	try {
-		const query = `
-			SELECT * 
-			FROM archive 
-			WHERE 
-				name ILIKE '%' || $1 || '%' 
-				OR ("localDetails" IS NOT NULL AND "localDetails"::text ILIKE '%' || $1 || '%')
-				OR ("webDetails" IS NOT NULL AND "webDetails"::text ILIKE '%' || $1 || '%');
-		`;
-		const values = [searchText];
-		const rows = await executeQuery(query, values);
-
-		return rows || [];
-	} catch (error) {
-		logger.error("getFilesByText", error.message);
 
 		return [];
 	}
