@@ -8,7 +8,6 @@ import lusca from "lusca";
 import helmet from "helmet";
 import cors from "cors";
 import path from "path";
-import fs from "fs-extra";
 
 import { AppRoutes } from "./routes";
 import { BooksStore } from "(src)/services/BooksStore";
@@ -28,19 +27,6 @@ app.use(lusca.xframe("SAMEORIGIN"));
 app.use(lusca.xssProtection(true));
 app.use(helmet());
 app.use(cors());
-
-app.get("/*", function (req, res, next) {
-	if (/\.[^\/]+$/.test(req.path)) {
-		const filePath = path.join(__dirname, "public", req.path);
-		if (fs.pathExistsSync(filePath)) {
-			res.sendFile(filePath);
-		} else {
-			res.status(404).send("Not Found");
-		}
-	} else {
-		res.sendFile(path.join(__dirname, "public", "index.html"));
-	}
-});
 
 AppRoutes.forEach(route => {
 	(app as any)[route.method](route.path, (request: Request, response: Response, next: NextFunction) => {
