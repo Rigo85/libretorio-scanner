@@ -27,3 +27,5 @@
   - `docker exec -it mi-redis /bin/bash`
   - `redis-cli`
   - `llen FileWatcherQueue`, revisar en la configuración del container el nombre correcto de la cola.
+- **Revisar linuxserver/calibre**:
+  -  `https://github.com/linuxserver/docker-calibre/blob/master/Dockerfile.aarch64`
