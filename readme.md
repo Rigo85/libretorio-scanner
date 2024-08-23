@@ -18,3 +18,7 @@
   - `sudo docker exec -ti libretorio-scanner /bin/bash`
 - **Revisar logs del backend**:
   - `sudo docker logs -t libretorio-scanner -f`
+- **Entrar a REDIS para revisar estado de las colas**:
+  - `docker exec -it mi-redis /bin/bash`
+  - `redis-cli`
+  - `llen FileWatcherQueue`, revisar en la configuración del container el nombre correcto de la cola.
