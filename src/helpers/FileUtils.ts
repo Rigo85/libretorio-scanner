@@ -31,6 +31,7 @@ export interface File {
 	name: string;
 	parentPath: string;
 	parentHash: string;
+	fileHash: string;
 	size: string;
 	coverId: string;
 	localDetails?: string;
@@ -43,14 +44,6 @@ export interface Directory {
 	name: string;
 	hash: string;
 	directories: Directory[];
-}
-
-export interface DecompressPages {
-	pages: any[];
-	pageIndex: number;
-	currentPagesLength: number;
-	totalPages: number;
-	index: number;
 }
 
 export async function scanCompareUpdate(scanRootPath: string) {
@@ -78,11 +71,8 @@ export async function scanCompareUpdate(scanRootPath: string) {
 		// - obtener los archivos de la db.
 		const hashes = await getFileHashes(scanRoot.id);
 
-		const fileToRemove = hashes.filter((h: { hash: string }) => {
-			return !scanRootResult.scan.files.find((file: File) => {
-				return h.hash === generateHash(path.join(file.parentPath, file.name), true);
-			});
-		});
+		const fileToRemove = hashes.filter((h: { hash: string }) =>
+			!scanRootResult.scan.files.find((file: File) => h.hash === file.fileHash));
 
 		// - eliminar los archivos en la db que NO estén en el scan.
 		if (fileToRemove.length) {
@@ -91,16 +81,16 @@ export async function scanCompareUpdate(scanRootPath: string) {
 		}
 
 		// - los archivos del scan que no estén en la db, se insertan.
-		const newFiles = scanRootResult.scan.files.filter((file: File) => {
-			return !hashes.find((h: { hash: string }) => {
-				return h.hash === generateHash(path.join(file.parentPath, file.name), true);
-			});
-		});
+		const newFiles = scanRootResult.scan.files.filter((file: File) =>
+			!hashes.find((h: { hash: string }) => h.hash === file.fileHash));
 
 		logger.info(`New files: ${newFiles.length}.`);
 		logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
 
+		let count = 1;
 		for (const file of newFiles) {
+			logger.info(`Updating book details info ${count++}/${newFiles.length}: "${path.join(file.parentPath, file.name)}"`);
+
 			const _file = await fillFileDetails(file);
 			await insertFile(_file, scanRoot.id);
 		}

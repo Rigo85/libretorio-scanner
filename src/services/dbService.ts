@@ -137,11 +137,11 @@ export async function insertFile(file: File, scanRootId: number): Promise<number
 
 	try {
 		const query = `
-			INSERT INTO archive (name, "parentPath", "parentHash", "localDetails", "webDetails", "size", "coverId", scan_root_id, "fileKind")
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			INSERT INTO archive (name, "parentPath", "parentHash", "fileHash", "localDetails", "webDetails", "size", "coverId", scan_root_id, "fileKind")
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id
         `;
-		const values = [file.name, file.parentPath, file.parentHash, file.localDetails, file.webDetails, file.size, file.coverId, scanRootId, file.fileKind];
+		const values = [file.name, file.parentPath, file.parentHash, file.fileHash, file.localDetails, file.webDetails, file.size, file.coverId, scanRootId, file.fileKind];
 
 		const fileIds = await executeQuery(query, values);
 
@@ -186,17 +186,10 @@ export async function removeFileByFileHash(hashes: string[]): Promise<number> {
 
 	try {
 		const query = `
-			DELETE FROM archive a
-				where encode(digest(
-                     case
-                         when right("parentPath", 1) = '/' then
-                             concat("parentPath", name)
-                         else
-                             concat("parentPath", '/', name)
-                         end
-                 , 'sha256'), 'hex') = ANY($1::text[])
-                 RETURNING a.id;
-			`;
+			DELETE FROM archive a 
+			WHERE "fileHash" = ANY($1::text[])
+            RETURNING a.id;
+		`;
 		const values = [hashes];
 
 		const removesFiles = await executeQuery(query, values);
@@ -214,14 +207,7 @@ export async function getFileHashes(scanRootId: number): Promise<{ hash: string 
 
 	try {
 		const query = `
-			SELECT encode(digest(
-			 case 
-				 when right("parentPath", 1) = '/'then 
-					 concat("parentPath", name)
-				 else 
-				 	concat("parentPath", '/', name)
-			 end
-			 , 'sha256'), 'hex') as "hash"
+			SELECT "fileHash" as "hash"
 			FROM archive WHERE scan_root_id = $1
 		`;
 		const values = [scanRootId];

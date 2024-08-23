@@ -84,6 +84,7 @@ export class Scanner {
 					name: item,
 					parentPath: dirPath,
 					parentHash: generateHash(dirPath),
+					fileHash: generateHash(itemPath, true),
 					size: humanFileSize(stats.size, true),
 					coverId: uuidv4(),
 					fileKind: FileKind.FILE
@@ -131,6 +132,7 @@ export class Scanner {
 					name: specialDirectory.name,
 					parentPath: dirPath,
 					parentHash: generateHash(dirPath),
+					fileHash: generateHash(path.join(dirPath, specialDirectory.name)),
 					size: await this.getSpecialDirectorySize(path.join(dirPath, specialDirectory.name), id), // compactar la carpeta y obtener el peso, ese compactado será la descarga.
 					coverId: id,
 					fileKind: result.fileKind
