@@ -1,23 +1,38 @@
 # Usar una imagen base con Node.js instalado
 FROM node:20.16
 
-# Necesario para el calibre
-RUN apt-get update && \
-    apt-get install -y \
+# Instalar las dependencias necesarias para Calibre y agregar el repositorio de Calibre
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common && \
+    add-apt-repository ppa:kovidgoyal/calibre && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    calibre \
+    dbus \
+    fcitx-rime \
+    fonts-wqy-microhei \
+    libnss3 \
+    libopengl0 \
+    libqpdf29t64 \
+    libxkbcommon-x11-0 \
+    libxcb-cursor0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-xinerama0 \
+    libxdamage1 \
+    poppler-utils \
+    python3 \
+    python3-xdg \
+    ttf-wqy-zenhei \
+    wget \
+    xz-utils \
+    speech-dispatcher \
     python3-pyqt5 \
-    libgl1-mesa-glx \
-    libegl1-mesa \
-    libxrandr2 \
-    libxrandr-dev \
-    libxss1 \
-    libxcursor1 \
-    libxcomposite1 \
-    libasound2 \
-    libxi6 \
-    libxtst6 \
-    libdbus-1-3 \
-    libopengl0 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    python3-pyqt5.qtwebengine && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Establecer el directorio de trabajo
 WORKDIR /app
@@ -25,7 +40,7 @@ WORKDIR /app
 # Copiar el proyecto desde la carpeta local al contenedor
 COPY . .
 
-# Instalar dependencias
+# Instalar dependencias de Node.js
 RUN npm install
 
 # Compilar la Aplicación TypeScript

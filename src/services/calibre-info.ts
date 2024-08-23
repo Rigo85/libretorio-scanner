@@ -16,7 +16,7 @@ export async function getEbookMeta(filePath: string, coverId: string): Promise<a
 			return undefined;
 		}
 
-		const calibrePath = path.join(__dirname, "calibre", "ebook-meta");
+		const calibrePath = "ebook-meta";
 		const coverPath = path.join(__dirname, "..", "public", "covers", `${coverId}.jpg`);
 
 		const {
