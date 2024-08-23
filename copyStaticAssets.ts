@@ -1,6 +1,7 @@
 import shell from "shelljs";
 import path from "path";
 
+shell.cp("-R", "src/services/calibre", "dist/services");
 shell.mkdir("-p", "dist/public/covers");
 shell.mkdir("-p", "dist/public/temp_covers");
 shell.mkdir("-p", "dist/public/cache");
