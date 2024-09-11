@@ -8,10 +8,13 @@ import lusca from "lusca";
 import helmet from "helmet";
 import cors from "cors";
 import path from "path";
+import { schedule } from "node-cron";
+import moment from "moment-timezone";
 
 import { AppRoutes } from "./routes";
 import { BooksStore } from "(src)/services/BooksStore";
-import { Logger } from "(src)/helpers/Logger"; // Routes file
+import { Logger } from "(src)/helpers/Logger";
+import * as process from "node:process"; // Routes file
 
 const logger = new Logger("App");
 
@@ -36,9 +39,21 @@ AppRoutes.forEach(route => {
 	});
 });
 
-BooksStore.getInstance().updateBooksInfo()
-	.catch((error) => {
-		logger.error("Initializing:", error);
-	});
+schedule(
+	process.env.CRON_SCHEDULE || "0 */1 * * *",
+	async () => {
+		logger.info(`Executing update book info cron at ${moment(new Date()).tz("America/Lima").format("LLLL")}`);
+		BooksStore
+			.getInstance()
+			.cronUpdateBooksInfo()
+			.catch((error: any) => {
+				logger.error("Executing update book info cron:", error);
+			})
+		;
+	},
+	{
+		timezone: "America/Lima"
+	}
+);
 
 export { app };

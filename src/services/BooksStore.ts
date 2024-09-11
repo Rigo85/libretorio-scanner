@@ -5,14 +5,15 @@ import {
 	getScanRoots,
 	insertFile,
 	insertScanRoot,
-	ScanRoot,
+	ScanRoot
 } from "(src)/services/dbService";
 import { Scanner, ScanRootResult } from "(src)/services/Scanner";
 import { FileWatcher } from "(src)/services/FileWatcher";
 import {
 	fillFileDetails,
-	removeTrailingSeparator
+	removeTrailingSeparator, scanCompareUpdate
 } from "(src)/helpers/FileUtils";
+import { ScannerCache } from "(src)/services/ScannerCache";
 
 const logger = new Logger("Books Store");
 
@@ -103,6 +104,35 @@ export class BooksStore {
 		}
 
 		logger.info("Done updating books info");
+	}
+
+	public async cronUpdateBooksInfo() {
+		logger.info("Cron updating books info");
+
+		try {
+			const isRunning = await ScannerCache.getInstance().isRunning();
+			if (isRunning) {
+				logger.info("Scanner is already running.");
+				return;
+			}
+
+			await ScannerCache.getInstance().setRunning(true);
+
+			const dbScanRoots = await getScanRoots();
+
+			if (!dbScanRoots.length) {
+				logger.error("No scan roots found.");
+				return;
+			}
+
+			await scanCompareUpdate(dbScanRoots[0].path);
+
+			logger.info("Done cron updating books info");
+		} catch (error) {
+			logger.error("cronUpdateBooksInfo:", error);
+		} finally {
+			await ScannerCache.getInstance().setRunning(false);
+		}
 	}
 }
 
