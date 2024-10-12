@@ -109,24 +109,22 @@ export class BooksStore {
 	public async cronUpdateBooksInfo() {
 		logger.info("Cron updating books info");
 
+		const isRunning = await ScannerCache.getInstance().isRunning();
+		if (isRunning) {
+			logger.info("Scanner is already running.");
+			return;
+		}
+
+		const dbScanRoots = await getScanRoots();
+		if (!dbScanRoots.length) {
+			logger.error("No scan roots found.");
+			return;
+		}
+
+		await ScannerCache.getInstance().setRunning(true);
+
 		try {
-			const isRunning = await ScannerCache.getInstance().isRunning();
-			if (isRunning) {
-				logger.info("Scanner is already running.");
-				return;
-			}
-
-			await ScannerCache.getInstance().setRunning(true);
-
-			const dbScanRoots = await getScanRoots();
-
-			if (!dbScanRoots.length) {
-				logger.error("No scan roots found.");
-				return;
-			}
-
 			await scanCompareUpdate(dbScanRoots[0].path);
-
 			logger.info("Done cron updating books info");
 		} catch (error) {
 			logger.error("cronUpdateBooksInfo:", error);
