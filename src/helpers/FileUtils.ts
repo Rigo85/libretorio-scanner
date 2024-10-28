@@ -2,10 +2,11 @@ import crypto from "crypto";
 import path from "path";
 import stringSimilarity from "string-similarity";
 import fs from "fs";
+import * as dotenv from "dotenv";
 
 import { getEbookMeta } from "(src)/services/calibre-info";
 import { getBookInfoOpenLibrary } from "(src)/services/book-info";
-import { Logger } from "(src)/helpers/Logger";
+import { Logger, isTrue } from "(src)/helpers/Logger";
 import {
 	getFileHashes,
 	getScanRootByPath,
@@ -14,6 +15,7 @@ import {
 } from "(src)/services/dbService";
 import { Scanner } from "(src)/services/Scanner";
 
+dotenv.config({path: ".env"});
 const logger = new Logger("File Utils");
 
 export enum FileKind {
@@ -24,7 +26,6 @@ export enum FileKind {
 	NONE = "NONE"
 	/* eslint-enable @typescript-eslint/naming-convention */
 }
-
 
 export interface File {
 	id?: number;
@@ -129,11 +130,12 @@ export async function fillFileDetails(file: File): Promise<File> {
 
 		const similarity = stringSimilarity.compareTwoStrings(filename, _title);
 
-		const bookInfo = await getBookInfoOpenLibrary(similarity >= 0.5 ? _title : filename);
-		if (bookInfo) {
-			file.webDetails = JSON.stringify(bookInfo);
+		if (isTrue(process.env.CAN_USE_OPENLIBRARY_API)) {
+			const bookInfo = await getBookInfoOpenLibrary(similarity >= 0.5 ? _title : filename);
+			if (bookInfo) {
+				file.webDetails = JSON.stringify(bookInfo);
+			}
 		}
-
 	} catch (error) {
 		console.error(`fillFileDetails "${path.join(file.parentPath, file.name)}":`, error.message);
 	}
