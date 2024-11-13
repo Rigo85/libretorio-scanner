@@ -191,7 +191,8 @@ export class Scanner {
 	private async scanForSpecialDirectories(directoryPath: string): Promise<FileKind> {
 		const scanners = [
 			this.scanForComics,
-			this.scanForEpubs
+			this.scanForEpubs,
+			this.scanForAudioBooks
 		];
 
 		for (const scanner of scanners) {
@@ -205,7 +206,57 @@ export class Scanner {
 	}
 
 	private async scanForComics(directoryPath: string): Promise<FileKind> {
-		const allowedExtensions = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
+		return this.scanForFolderOfFormat(directoryPath, ["jpg", "jpeg", "png", "webp", "gif"], FileKind.COMIC_MANGA);
+	}
+
+	private async scanForAudioBooks(directoryPath: string): Promise<FileKind> {
+		return this.scanForFolderOfFormat(directoryPath, ["mp3", "wav"], FileKind.AUDIOBOOK);
+	}
+
+	// private async scanForComics(directoryPath: string): Promise<FileKind> {
+	// 	const allowedExtensions = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
+	// 	let foundExtension: string = undefined;
+	//
+	// 	try {
+	// 		const files = fs.readdirSync(directoryPath);
+	//
+	// 		for (const file of files) {
+	// 			const filePath = path.join(directoryPath, file);
+	// 			const stat = fs.statSync(filePath);
+	//
+	// 			if (!stat.isFile()) {
+	// 				// logger.error(`scanForComics - "${filePath}" is not a file.`);
+	//
+	// 				return FileKind.NONE; // No es un archivo
+	// 			}
+	//
+	// 			const extension = path.extname(file).toLowerCase().slice(1);
+	//
+	// 			if (!allowedExtensions.has(extension)) {
+	// 				// logger.error(`scanForComics - "${file}" has an invalid extension.`);
+	//
+	// 				return FileKind.NONE; // Extensión no permitida
+	// 			}
+	//
+	// 			if (!foundExtension) {
+	// 				foundExtension = extension;
+	// 			} else if (foundExtension !== extension) {
+	// 				// logger.error(`scanForComics - "${file}" has a different extension of "${foundExtension || "none"}".`);
+	//
+	// 				return FileKind.NONE; // Las extensiones no coinciden
+	// 			}
+	// 		}
+	//
+	// 		return files.length ? FileKind.COMIC_MANGA : FileKind.NONE;
+	// 	} catch (error) {
+	// 		logger.error("scanForComics - Error reading directory:", error);
+	//
+	// 		return FileKind.NONE;
+	// 	}
+	// }
+
+	private async scanForFolderOfFormat(directoryPath: string, extensions: string[], format: FileKind): Promise<FileKind> {
+		const allowedExtensions = new Set(extensions || []);
 		let foundExtension: string = undefined;
 
 		try {
@@ -216,7 +267,7 @@ export class Scanner {
 				const stat = fs.statSync(filePath);
 
 				if (!stat.isFile()) {
-					// logger.error(`scanForComics - "${filePath}" is not a file.`);
+					// logger.error(`scanForFolderOfFormat - "${filePath}" is not a file.`);
 
 					return FileKind.NONE; // No es un archivo
 				}
@@ -224,7 +275,7 @@ export class Scanner {
 				const extension = path.extname(file).toLowerCase().slice(1);
 
 				if (!allowedExtensions.has(extension)) {
-					// logger.error(`scanForComics - "${file}" has an invalid extension.`);
+					// logger.error(`scanForFolderOfFormat - "${file}" has an invalid extension.`);
 
 					return FileKind.NONE; // Extensión no permitida
 				}
@@ -232,15 +283,15 @@ export class Scanner {
 				if (!foundExtension) {
 					foundExtension = extension;
 				} else if (foundExtension !== extension) {
-					// logger.error(`scanForComics - "${file}" has a different extension of "${foundExtension || "none"}".`);
+					// logger.error(`scanForFolderOfFormat - "${file}" has a different extension of "${foundExtension || "none"}".`);
 
 					return FileKind.NONE; // Las extensiones no coinciden
 				}
 			}
 
-			return files.length ? FileKind.COMIC_MANGA : FileKind.NONE;
+			return files.length ? format : FileKind.NONE;
 		} catch (error) {
-			logger.error("scanForComics - Error reading directory:", error);
+			logger.error("scanForFolderOfFormat - Error reading directory:", error);
 
 			return FileKind.NONE;
 		}
