@@ -190,9 +190,9 @@ export class Scanner {
 
 	private async scanForSpecialDirectories(directoryPath: string): Promise<FileKind> {
 		const scanners = [
-			this.scanForComics,
-			this.scanForEpubs,
-			this.scanForAudioBooks
+			this.scanForComics.bind(this),
+			this.scanForEpubs.bind(this),
+			this.scanForAudioBooks.bind(this)
 		];
 
 		for (const scanner of scanners) {
@@ -206,11 +206,11 @@ export class Scanner {
 	}
 
 	private async scanForComics(directoryPath: string): Promise<FileKind> {
-		return this.scanForFolderOfFormat(directoryPath, ["jpg", "jpeg", "png", "webp", "gif"], FileKind.COMIC_MANGA);
+		return await this.scanForFolderOfFormat(directoryPath, ["jpg", "jpeg", "png", "webp", "gif"], FileKind.COMIC_MANGA);
 	}
 
 	private async scanForAudioBooks(directoryPath: string): Promise<FileKind> {
-		return this.scanForFolderOfFormat(directoryPath, ["mp3", "wav"], FileKind.AUDIOBOOK);
+		return await this.scanForFolderOfFormat(directoryPath, ["mp3", "wav"], FileKind.AUDIOBOOK);
 	}
 
 	// private async scanForComics(directoryPath: string): Promise<FileKind> {
