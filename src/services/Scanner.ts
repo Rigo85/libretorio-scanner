@@ -379,12 +379,14 @@ export class Scanner {
 					return FileKind.NONE; // Extensión no permitida
 				}
 
-				if (!foundExtension) {
-					foundExtension = extension;
-				} else if (foundExtension !== extension && strict) {
-					// logger.error(`scanForFolderOfFormat - "${file}" has a different extension of "${foundExtension || "none"}".`);
+				if (strict) {
+					if (!foundExtension) {
+						foundExtension = extension;
+					} else if (foundExtension !== extension) {
+						// logger.error(`scanForFolderOfFormat - "${file}" has a different extension of "${foundExtension || "none"}".`);
 
-					return FileKind.NONE; // Las extensiones no coinciden
+						return FileKind.NONE; // Las extensiones no coinciden
+					}
 				}
 			}
 
