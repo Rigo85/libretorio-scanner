@@ -21,6 +21,9 @@ try {
 	logger.error("Error parsing P_LIMIT:", error);
 	__limit = 4;
 }
+const debuglogScannerOfFormats = process.env.DEBUGLOG_SCANNER_OF_FORMATS;
+assert.ok(debuglogScannerOfFormats, "DEBUGLOG_SCANNER_OF_FORMATS is not defined.");
+const debugLogs = debuglogScannerOfFormats === "true";
 
 export interface ScanResult {
 	directories: Directory;
@@ -240,7 +243,7 @@ export class Scanner {
 	}
 
 	private async scanForAudioBooks(directoryPath: string): Promise<FileKind> {
-		return await this.scanForFolderOfFormat(directoryPath, ["mp3", "wav"], FileKind.AUDIOBOOK);
+		return await this.scanForFolderOfFormat(directoryPath, ["mp3", "wav", "m4a", "m4b", "ogg"], FileKind.AUDIOBOOK);
 	}
 
 	private async scanForFolderOfFormat(directoryPath: string, extensions: string[], format: FileKind): Promise<FileKind> {
@@ -281,7 +284,9 @@ export class Scanner {
 
 			return format;
 		} catch (error) {
-			logger.error("scanForFolderOfFormat:", error.message);
+			if (debugLogs) {
+				logger.error("scanForFolderOfFormat:", error.message);
+			}
 			return FileKind.NONE;
 		}
 	}
