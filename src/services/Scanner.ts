@@ -3,7 +3,6 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { parseStringPromise } from "xml2js";
 import archiver from "archiver";
-import pLimit from "p-limit";
 import { strict as assert } from "node:assert";
 
 import { Logger } from "(src)/helpers/Logger";
