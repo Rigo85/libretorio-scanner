@@ -281,7 +281,7 @@ export class Scanner {
 
 			return format;
 		} catch (error) {
-			logger.error("scanForFolderOfFormat - Error:", error);
+			logger.error("scanForFolderOfFormat:", error.message);
 			return FileKind.NONE;
 		}
 	}
