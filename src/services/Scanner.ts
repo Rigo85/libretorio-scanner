@@ -243,10 +243,10 @@ export class Scanner {
 	}
 
 	private async scanForAudioBooks(directoryPath: string): Promise<FileKind> {
-		return await this.scanForFolderOfFormat(directoryPath, ["mp3", "wav", "m4a", "m4b", "ogg"], FileKind.AUDIOBOOK);
+		return await this.scanForFolderOfFormat(directoryPath, ["mp3", "wav", "m4a", "m4b", "ogg"], FileKind.AUDIOBOOK, false);
 	}
 
-	private async scanForFolderOfFormat(directoryPath: string, extensions: string[], format: FileKind): Promise<FileKind> {
+	private async scanForFolderOfFormat(directoryPath: string, extensions: string[], format: FileKind, strict: boolean = true): Promise<FileKind> {
 		const allowedExtensions = new Set(extensions || []);
 		let foundExtension: string | undefined = undefined;
 
@@ -273,7 +273,7 @@ export class Scanner {
 
 				if (!foundExtension) {
 					foundExtension = extension;
-				} else if (foundExtension !== extension) {
+				} else if (foundExtension !== extension && strict) {
 					// logger.error(`scanForFolderOfFormat - "${item.name}" has a different extension of "${foundExtension}".`);
 					throw new Error(`"${item.name}" has a different extension.`);
 				}
