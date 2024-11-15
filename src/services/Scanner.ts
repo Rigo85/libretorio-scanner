@@ -1,13 +1,26 @@
-import fs from "fs";
+import fs from "fs-extra";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { parseStringPromise } from "xml2js";
 import archiver from "archiver";
+import pLimit from "p-limit";
+import { strict as assert } from "node:assert";
 
 import { Logger } from "(src)/helpers/Logger";
 import { Directory, File, FileKind, generateHash, humanFileSize } from "(src)/helpers/FileUtils";
 
 const logger = new Logger("Scanner");
+
+const _limit = process.env.P_LIMIT;
+assert.ok(_limit, "P_LIMIT is not defined.");
+// eslint-disable-next-line @typescript-eslint/naming-convention
+let __limit: number;
+try {
+	__limit = parseInt(_limit);
+} catch (error) {
+	logger.error("Error parsing P_LIMIT:", error);
+	__limit = 4;
+}
 
 export interface ScanResult {
 	directories: Directory;
@@ -67,21 +80,24 @@ export class Scanner {
 			directories: [] as Directory[]
 		};
 
-		const filesList = [] as File[];
+		const filesList: File[] = [];
 
-		const items = fs.readdirSync(dirPath);
+		const limit = pLimit(__limit); // Limitamos la concurrencia a 4
 
-		for (const item of items) {
-			const itemPath = path.join(dirPath, item);
-			const stats = fs.statSync(itemPath);
+		const items = await fs.readdir(dirPath, {withFileTypes: true});
 
-			if (stats.isDirectory()) {
+		// Creamos una lista de promesas con limitación de concurrencia
+		const promises = items.map((item) => limit(async () => {
+			const itemPath = path.join(dirPath, item.name);
+
+			if (item.isDirectory()) {
 				const subdirectoryStructure = await this.getStructureAndFiles(itemPath);
 				structure.directories.push(subdirectoryStructure.directories);
 				filesList.push(...subdirectoryStructure.files);
-			} else if (stats.isFile()) {
+			} else if (item.isFile()) {
+				const stats = await fs.stat(itemPath);
 				filesList.push({
-					name: item,
+					name: item.name,
 					parentPath: dirPath,
 					parentHash: generateHash(dirPath),
 					fileHash: generateHash(itemPath, true),
@@ -90,7 +106,10 @@ export class Scanner {
 					fileKind: FileKind.FILE
 				});
 			}
-		}
+		}));
+
+		// Esperamos a que todas las promesas se resuelvan
+		await Promise.all(promises);
 
 		return {directories: structure, files: filesList};
 	}
@@ -108,21 +127,22 @@ export class Scanner {
 	): Promise<{ directory: Directory; files: File[] }> {
 
 		const directories = directory.directories as Directory[];
-		const results = [] as { directory: Directory; fileKind: FileKind }[];
+		const limit = pLimit(__limit);
+		const results: { directory: Directory; fileKind: FileKind }[] = [];
 
-		for (const directory of directories) {
-			const directoryPath = path.join(dirPath, directory.name);
+		// Procesamos los directorios en paralelo con limitación de concurrencia
+		await Promise.all(directories.map(dir => limit(async () => {
+			const directoryPath = path.join(dirPath, dir.name);
 			const fileKind = await this.scanForSpecialDirectories(directoryPath);
 
 			if (fileKind !== FileKind.NONE) {
-				results.push({directory, fileKind});
+				results.push({directory: dir, fileKind});
 			}
-		}
+		})));
 
-		// logger.info(`dirPath: ${dirPath} - results: ${JSON.stringify(results)}`);
-
+		// Procesamos los resultados
 		for (const result of results) {
-			const index = directories.findIndex((directory: Directory) => directory.name === result.directory.name);
+			const index = directories.findIndex((dir: Directory) => dir.name === result.directory.name);
 
 			if (index > -1) {
 				const [specialDirectory] = directories.splice(index, 1);
@@ -133,26 +153,24 @@ export class Scanner {
 					parentPath: dirPath,
 					parentHash: generateHash(dirPath),
 					fileHash: generateHash(path.join(dirPath, specialDirectory.name)),
-					size: await this.getSpecialDirectorySize(path.join(dirPath, specialDirectory.name), id), // compactar la carpeta y obtener el peso, ese compactado será la descarga.
+					size: await this.getSpecialDirectorySize(path.join(dirPath, specialDirectory.name), id),
 					coverId: id,
 					fileKind: result.fileKind
 				});
 
-				for (let i = files.length - 1; i >= 0; i--) {
-					const fileParentPath = path.normalize(files[i].parentPath);
+				// Eliminamos archivos que estén dentro del directorio especial
+				files = files.filter(file => {
+					const fileParentPath = path.normalize(file.parentPath);
 					const specialDirPath = path.normalize(path.join(dirPath, specialDirectory.name));
-					if (fileParentPath.startsWith(specialDirPath)) {
-						files.splice(i, 1);
-					}
-				}
+					return !fileParentPath.startsWith(specialDirPath);
+				});
 			}
 		}
 
-		for (const _directory of directories) {
-			// logger.info(`${_directory.name} - files length b4: ${files.length}`);
-			await this._helper(_directory, files, path.join(dirPath, _directory.name));
-			// logger.info(`${_directory.name} - files length after: ${files.length}`);
-		}
+		// Procesamos subdirectorios recursivamente con limitación de concurrencia
+		await Promise.all(directories.map(dir => limit(async () => {
+			await this._helper(dir, files, path.join(dirPath, dir.name));
+		})));
 
 		return {directory, files};
 	}
@@ -160,7 +178,7 @@ export class Scanner {
 	private async getSpecialDirectorySize(directoryPath: string, id: string): Promise<string> {
 		try {
 			const cachePath = path.join(__dirname, "..", "public", "cache", id);
-			fs.mkdirSync(cachePath, {recursive: true});
+			await fs.mkdir(cachePath, {recursive: true});
 
 			return new Promise((resolve, reject) => {
 				const outputFileName = path.join(cachePath, `${id}.zip`);
@@ -195,14 +213,26 @@ export class Scanner {
 			this.scanForAudioBooks.bind(this)
 		];
 
-		for (const scanner of scanners) {
+		const limit = pLimit(__limit);
+
+		// Creamos promesas para cada escáner con control de concurrencia
+		const scannerPromises = scanners.map(scanner => limit(async () => {
 			const fileKind = await scanner(directoryPath);
 			if (fileKind !== FileKind.NONE) {
 				return fileKind;
+			} else {
+				// Rechazamos la promesa si no se encuentra un resultado válido
+				throw new Error("No match");
 			}
-		}
+		}));
 
-		return FileKind.NONE;
+		try {
+			// Usamos Promise.any para retornar el primer resultado válido
+			return await Promise.any(scannerPromises);
+		} catch (error) {
+			// Si todos los escáneres fallan, retornamos FileKind.NONE
+			return FileKind.NONE;
+		}
 	}
 
 	private async scanForComics(directoryPath: string): Promise<FileKind> {
@@ -213,143 +243,105 @@ export class Scanner {
 		return await this.scanForFolderOfFormat(directoryPath, ["mp3", "wav"], FileKind.AUDIOBOOK);
 	}
 
-	// private async scanForComics(directoryPath: string): Promise<FileKind> {
-	// 	const allowedExtensions = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
-	// 	let foundExtension: string = undefined;
-	//
-	// 	try {
-	// 		const files = fs.readdirSync(directoryPath);
-	//
-	// 		for (const file of files) {
-	// 			const filePath = path.join(directoryPath, file);
-	// 			const stat = fs.statSync(filePath);
-	//
-	// 			if (!stat.isFile()) {
-	// 				// logger.error(`scanForComics - "${filePath}" is not a file.`);
-	//
-	// 				return FileKind.NONE; // No es un archivo
-	// 			}
-	//
-	// 			const extension = path.extname(file).toLowerCase().slice(1);
-	//
-	// 			if (!allowedExtensions.has(extension)) {
-	// 				// logger.error(`scanForComics - "${file}" has an invalid extension.`);
-	//
-	// 				return FileKind.NONE; // Extensión no permitida
-	// 			}
-	//
-	// 			if (!foundExtension) {
-	// 				foundExtension = extension;
-	// 			} else if (foundExtension !== extension) {
-	// 				// logger.error(`scanForComics - "${file}" has a different extension of "${foundExtension || "none"}".`);
-	//
-	// 				return FileKind.NONE; // Las extensiones no coinciden
-	// 			}
-	// 		}
-	//
-	// 		return files.length ? FileKind.COMIC_MANGA : FileKind.NONE;
-	// 	} catch (error) {
-	// 		logger.error("scanForComics - Error reading directory:", error);
-	//
-	// 		return FileKind.NONE;
-	// 	}
-	// }
-
 	private async scanForFolderOfFormat(directoryPath: string, extensions: string[], format: FileKind): Promise<FileKind> {
 		const allowedExtensions = new Set(extensions || []);
-		let foundExtension: string = undefined;
+		let foundExtension: string | undefined = undefined;
 
 		try {
-			const files = fs.readdirSync(directoryPath);
+			const limit = pLimit(__limit);
+			const items = await fs.readdir(directoryPath, {withFileTypes: true});
 
-			for (const file of files) {
-				const filePath = path.join(directoryPath, file);
-				const stat = fs.statSync(filePath);
+			if (!items.length) {
+				return FileKind.NONE; // El directorio está vacío
+			}
 
-				if (!stat.isFile()) {
-					// logger.error(`scanForFolderOfFormat - "${filePath}" is not a file.`);
-
-					return FileKind.NONE; // No es un archivo
+			const promises = items.map(item => limit(async () => {
+				if (!item.isFile()) {
+					// logger.error(`scanForFolderOfFormat - "${item.name}" is not a file.`);
+					throw new Error(`"${item.name}" is not a file.`);
 				}
 
-				const extension = path.extname(file).toLowerCase().slice(1);
+				const extension = path.extname(item.name).toLowerCase().slice(1);
 
 				if (!allowedExtensions.has(extension)) {
-					// logger.error(`scanForFolderOfFormat - "${file}" has an invalid extension.`);
-
-					return FileKind.NONE; // Extensión no permitida
+					// logger.error(`scanForFolderOfFormat - "${item.name}" has an invalid extension.`);
+					throw new Error(`"${item.name}" has an invalid extension.`);
 				}
 
 				if (!foundExtension) {
 					foundExtension = extension;
 				} else if (foundExtension !== extension) {
-					// logger.error(`scanForFolderOfFormat - "${file}" has a different extension of "${foundExtension || "none"}".`);
-
-					return FileKind.NONE; // Las extensiones no coinciden
+					// logger.error(`scanForFolderOfFormat - "${item.name}" has a different extension of "${foundExtension}".`);
+					throw new Error(`"${item.name}" has a different extension.`);
 				}
-			}
+			}));
 
-			return files.length ? format : FileKind.NONE;
+			// Esperamos a que todas las promesas se resuelvan
+			await Promise.all(promises);
+
+			return format;
 		} catch (error) {
-			logger.error("scanForFolderOfFormat - Error reading directory:", error);
-
+			logger.error("scanForFolderOfFormat - Error:", error);
 			return FileKind.NONE;
 		}
 	}
 
 	private async scanForEpubs(directoryPath: string): Promise<FileKind> {
 		try {
-			// 1. Verificar el archivo mimetype
+			// 1. Verificar el archivo mimetype de forma asíncrona
 			const mimetypePath = path.join(directoryPath, "mimetype");
-			if (!fs.existsSync(mimetypePath)) {
+			const mimetypeExists = await fs.pathExists(mimetypePath);
+
+			if (!mimetypeExists) {
 				// logger.error(`scanForEpubs - "${mimetypePath}" does not exist.`);
-
 				return FileKind.NONE;
 			}
-			const mimetypeContent = fs.readFileSync(mimetypePath, "utf-8").trim();
+
+			const mimetypeContent = (await fs.readFile(mimetypePath, "utf-8")).trim();
 			if (mimetypeContent !== "application/epub+zip") {
-				// logger.error(`scanForEpubs - "${mimetypePath}" has an invalid content.`);
-
+				// logger.error(`scanForEpubs - "${mimetypePath}" has invalid content.`);
 				return FileKind.NONE;
 			}
 
-			// 2. Verificar el directorio META-INF y el archivo container.xml
+			// 2. Verificar el directorio META-INF y el archivo container.xml de forma asíncrona
 			const metaInfPath = path.join(directoryPath, "META-INF");
 			const containerXmlPath = path.join(metaInfPath, "container.xml");
-			if (!fs.existsSync(containerXmlPath)) {
-				// logger.error(`scanForEpubs - "${containerXmlPath}" does not exist.`);
+			const containerXmlExists = await fs.pathExists(containerXmlPath);
 
+			if (!containerXmlExists) {
+				// logger.error(`scanForEpubs - "${containerXmlPath}" does not exist.`);
 				return FileKind.NONE;
 			}
 
 			// 3. Leer y analizar el archivo container.xml para encontrar el archivo .opf
-			const containerXmlContent = fs.readFileSync(containerXmlPath, "utf-8");
+			const containerXmlContent = await fs.readFile(containerXmlPath, "utf-8");
 			let opfFilePath: string;
+
 			try {
 				const parsedXml = await parseStringPromise(containerXmlContent);
-				// logger.info(JSON.stringify(parsedXml));
 				const rootFile = parsedXml.container?.rootfiles?.[0]?.rootfile?.[0];
 				if (rootFile && rootFile.$ && rootFile.$["full-path"]) {
 					opfFilePath = rootFile.$["full-path"];
 				} else {
-					return FileKind.NONE; // Fallar si no se encuentra la ruta al OPF
+					// logger.error(`scanForEpubs - "${containerXmlPath}" does not contain a valid .opf file path.`);
+					return FileKind.NONE;
 				}
 			} catch (error) {
 				// logger.error(`scanForEpubs - Error parsing "${containerXmlPath}":`, error);
-
 				return FileKind.NONE;
 			}
 
 			// 4. Verificar la existencia del archivo .opf
 			if (!opfFilePath) {
-				// logger.error(`scanForEpubs - "${containerXmlPath}" does not contain a valid .opf file path.`);
+				// logger.error(`scanForEpubs - No .opf file path found in "${containerXmlPath}".`);
 				return FileKind.NONE;
 			}
 
 			const opfAbsolutePath = path.join(directoryPath, opfFilePath);
-			if (!fs.existsSync(opfAbsolutePath)) {
-				// logger.error(`scanForEpubs - "${opfAbsolutePath}" does not exist.`);
+			const opfExists = await fs.pathExists(opfAbsolutePath);
 
+			if (!opfExists) {
+				// logger.error(`scanForEpubs - "${opfAbsolutePath}" does not exist.`);
 				return FileKind.NONE;
 			}
 
