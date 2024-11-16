@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import path from "path";
 import stringSimilarity from "string-similarity";
-import fs from "fs";
+import fs from "fs-extra";
 import * as dotenv from "dotenv";
 
 import { getEbookMeta } from "(src)/services/calibre-info";
@@ -14,6 +14,7 @@ import {
 	removeFileByParentHash, updateScanRoot
 } from "(src)/services/dbService";
 import { Scanner } from "(src)/services/Scanner";
+import archiver from "archiver";
 
 dotenv.config({path: ".env"});
 const logger = new Logger("File Utils");
@@ -94,6 +95,12 @@ export async function scanCompareUpdate(scanRootPath: string) {
 			logger.info(`Updating book details info ${count++}/${newFiles.length}: "${path.join(file.parentPath, file.name)}"`);
 
 			const _file = await fillFileDetails(file);
+			// actualizar peso de los archivos especiales.
+			if (_file.fileKind !== FileKind.FILE && _file.fileKind !== FileKind.NONE) {
+				logger.info(`Getting special directory size: "${path.join(_file.parentPath, _file.name)}"`);
+				_file.size = await getSpecialDirectorySize(path.join(_file.parentPath, _file.name), _file.coverId);
+				logger.info(`Special directory size: "${_file.size}"`);
+			}
 			await insertFile(_file, scanRoot.id);
 		}
 
@@ -207,4 +214,35 @@ export function checkIfPathExistsAndIsFile(filePath: string): boolean {
 		return fs.statSync(filePath).isFile();
 	}
 	return false;
+}
+
+async function getSpecialDirectorySize(directoryPath: string, id: string): Promise<string> {
+	try {
+		const cachePath = path.join(__dirname, "..", "public", "cache", id);
+		await fs.mkdir(cachePath, {recursive: true});
+
+		return new Promise((resolve, reject) => {
+			const outputFileName = path.join(cachePath, `${id}.zip`);
+			const output = fs.createWriteStream(outputFileName);
+			const archive = archiver("zip", {
+				zlib: {level: 9} // Nivel de compresión
+			});
+
+			output.on("close", () => {
+				resolve(humanFileSize(archive.pointer(), true)); // Devuelve el tamaño del archivo ZIP en bytes
+			});
+
+			archive.on("error", (err) => {
+				reject(err); // Rechaza la promesa en caso de error
+			});
+
+			archive.pipe(output);
+			archive.directory(directoryPath, false);
+			archive.finalize();
+		});
+	} catch (error) {
+		logger.error("getSpecialDirectorySize - Error reading directory:", error);
+
+		return "0";
+	}
 }

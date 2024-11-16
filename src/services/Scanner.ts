@@ -102,10 +102,7 @@ export class Scanner {
 		return {directories: directory, files} as ScanResult;
 	}
 
-	private async _helper(
-		directory: Directory,
-		files: File[],
-		dirPath: string
+	private async _helper(directory: Directory, files: File[], dirPath: string
 	): Promise<{ directory: Directory; files: File[] }> {
 
 		const directories = directory.directories as Directory[];
@@ -134,7 +131,8 @@ export class Scanner {
 					parentPath: dirPath,
 					parentHash: generateHash(dirPath),
 					fileHash: generateHash(path.join(dirPath, specialDirectory.name)),
-					size: await this.getSpecialDirectorySize(path.join(dirPath, specialDirectory.name), id), // compactar la carpeta y obtener el peso, ese compactado será la descarga.
+					// size: await this.getSpecialDirectorySize(path.join(dirPath, specialDirectory.name), id), // compactar la carpeta y obtener el peso, ese compactado será la descarga.
+					size: "0",
 					coverId: id,
 					fileKind: result.fileKind
 				});
@@ -158,36 +156,36 @@ export class Scanner {
 		return {directory, files};
 	}
 
-	private async getSpecialDirectorySize(directoryPath: string, id: string): Promise<string> {
-		try {
-			const cachePath = path.join(__dirname, "..", "public", "cache", id);
-			await fs.mkdir(cachePath, {recursive: true});
-
-			return new Promise((resolve, reject) => {
-				const outputFileName = path.join(cachePath, `${id}.zip`);
-				const output = fs.createWriteStream(outputFileName);
-				const archive = archiver("zip", {
-					zlib: {level: 9} // Nivel de compresión
-				});
-
-				output.on("close", () => {
-					resolve(humanFileSize(archive.pointer(), true)); // Devuelve el tamaño del archivo ZIP en bytes
-				});
-
-				archive.on("error", (err) => {
-					reject(err); // Rechaza la promesa en caso de error
-				});
-
-				archive.pipe(output);
-				archive.directory(directoryPath, false);
-				archive.finalize();
-			});
-		} catch (error) {
-			logger.error("getSpecialDirectorySize - Error reading directory:", error);
-
-			return "0";
-		}
-	}
+	// private async getSpecialDirectorySize(directoryPath: string, id: string): Promise<string> {
+	// 	try {
+	// 		const cachePath = path.join(__dirname, "..", "public", "cache", id);
+	// 		await fs.mkdir(cachePath, {recursive: true});
+	//
+	// 		return new Promise((resolve, reject) => {
+	// 			const outputFileName = path.join(cachePath, `${id}.zip`);
+	// 			const output = fs.createWriteStream(outputFileName);
+	// 			const archive = archiver("zip", {
+	// 				zlib: {level: 9} // Nivel de compresión
+	// 			});
+	//
+	// 			output.on("close", () => {
+	// 				resolve(humanFileSize(archive.pointer(), true)); // Devuelve el tamaño del archivo ZIP en bytes
+	// 			});
+	//
+	// 			archive.on("error", (err) => {
+	// 				reject(err); // Rechaza la promesa en caso de error
+	// 			});
+	//
+	// 			archive.pipe(output);
+	// 			archive.directory(directoryPath, false);
+	// 			archive.finalize();
+	// 		});
+	// 	} catch (error) {
+	// 		logger.error("getSpecialDirectorySize - Error reading directory:", error);
+	//
+	// 		return "0";
+	// 	}
+	// }
 
 	private async scanForSpecialDirectories(directoryPath: string): Promise<FileKind> {
 		const scanners = [
