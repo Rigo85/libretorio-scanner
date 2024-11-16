@@ -221,3 +221,56 @@ export async function getFileHashes(scanRootId: number): Promise<{ hash: string 
 		return [];
 	}
 }
+
+export async function getSpecialArchives(scanRootId: number): Promise<File[]> {
+	logger.info(`getSpecialArchives for scan root: "${scanRootId}".`);
+
+	try {
+		const query = `
+            SELECT *
+            FROM archive 
+            WHERE 
+	            scan_root_id = $1 AND 
+	            "fileKind" <> 'FILE' AND 
+	            "fileKind" <> 'NONE'
+		`;
+		const values = [scanRootId];
+
+		const files = await executeQuery(query, values);
+
+		return files || [];
+	} catch (error) {
+		logger.error(`getSpecialArchives "${scanRootId}":`, error.message);
+
+		return [];
+	}
+}
+
+export async function updateSpecialArchiveSize(id: number, size: string): Promise<number> {
+	logger.info(`updateSpecialArchiveSize: "${id}".`);
+
+	try {
+		const query = `
+			UPDATE archive SET size = $1 WHERE id = $2
+			RETURNING id
+		`;
+
+		const values = [size, id];
+		const fileIds = await executeQuery(query, values);
+
+		if (!fileIds?.length) {
+			logger.error(`Error updating special archive size "${id}".`);
+
+			return undefined;
+		}
+
+		const fileId = fileIds[0].id;
+		logger.info(`Updated special archive size with id: "${fileId}".`);
+
+		return fileId;
+	} catch (error) {
+		logger.error(`updateSpecialArchiveSize "${id}":`, error.message);
+
+		return undefined;
+	}
+}

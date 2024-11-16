@@ -9,9 +9,9 @@ import { getBookInfoOpenLibrary } from "(src)/services/book-info";
 import { Logger, isTrue } from "(src)/helpers/Logger";
 import {
 	getFileHashes,
-	getScanRootByPath,
+	getScanRootByPath, getSpecialArchives,
 	insertFile, removeFileByFileHash,
-	removeFileByParentHash, updateScanRoot
+	removeFileByParentHash, updateScanRoot, updateSpecialArchiveSize
 } from "(src)/services/dbService";
 import { Scanner } from "(src)/services/Scanner";
 import archiver from "archiver";
@@ -59,6 +59,20 @@ export async function scanCompareUpdate(scanRootPath: string) {
 			logger.error("No scan roots found.");
 
 			return;
+		}
+
+		// - en caso de que no exista el cache de los archivos especiales, se actualiza el tamaño y se crea la cache.
+		// - puede ocurrir que la tenga que borrar por mantenimiento.
+		const specialArchives = await getSpecialArchives(scanRoot.id);
+		for (const sa of specialArchives) {
+			const cachePath = path.join(__dirname, "..", "public", "cache", sa.coverId);
+			const exist = await fs.pathExists(cachePath);
+			if (!exist) {
+				logger.info(`Special archive cache not found: "${cachePath}".`);
+				sa.size = await getSpecialDirectorySize(path.join(sa.parentPath, sa.name), sa.coverId);
+				await updateSpecialArchiveSize(sa.id, sa.size);
+				logger.info(`Special archive size updated: "${sa.name}" - "${sa.size}".`);
+			}
 		}
 
 		// - escanear el directorio observado.
