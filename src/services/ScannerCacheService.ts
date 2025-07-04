@@ -1,13 +1,13 @@
-import { RedisCache } from "(src)/services/RedisCache";
 import { Logger } from "(src)/helpers/Logger";
+import { RedisCacheService } from "(src)/services/RedisCacheService";
 
-const logger = new Logger("Scanner Cache");
+const logger = new Logger("ScannerCache Service");
 
-export class ScannerCache {
-	private static instance: ScannerCache;
+export class ScannerCacheService {
+	private static instance: ScannerCacheService;
 
 	private constructor() {
-		RedisCache.getInstance()
+		RedisCacheService.getInstance()
 			.get("scannerCache")
 			.then((value: string) => {
 				if (value) {
@@ -18,14 +18,14 @@ export class ScannerCache {
 						logger.info(`ScannerCache last scan was at "${cache.lastScan}".`);
 					}
 				} else {
-					RedisCache.getInstance()
+					RedisCacheService.getInstance()
 						.set("scannerCache", JSON.stringify({
 							isRunning: false,
 							lastScan: "<no scan yet>",
 							startedAt: "<not started>"
 						}))
 						.then(() => logger.info("ScannerCache initialized."))
-						.catch(error => logger.error("Error setting scannerCache:", error))
+						.catch((error: any) => logger.error("Error setting scannerCache:", error))
 					;
 				}
 			})
@@ -33,17 +33,16 @@ export class ScannerCache {
 		;
 	}
 
-	public static getInstance(): ScannerCache {
-		if (!ScannerCache.instance) {
-			ScannerCache.instance = new ScannerCache();
+	public static getInstance(): ScannerCacheService {
+		if (!ScannerCacheService.instance) {
+			ScannerCacheService.instance = new ScannerCacheService();
 		}
-
-		return ScannerCache.instance;
+		return ScannerCacheService.instance;
 	}
 
 	public async isRunning(): Promise<boolean> {
 		try {
-			const value = await RedisCache.getInstance().get("scannerCache");
+			const value = await RedisCacheService.getInstance().get("scannerCache");
 			if (value) {
 				const cache = JSON.parse(value) as { isRunning: boolean; lastScan: string; startedAt: string };
 				return cache.isRunning;
@@ -58,30 +57,30 @@ export class ScannerCache {
 
 	public async setRunning(isRunning: boolean): Promise<void> {
 		try {
-			const cacheStr = await RedisCache.getInstance().get("scannerCache");
+			const cacheStr = await RedisCacheService.getInstance().get("scannerCache");
 			const cache = cacheStr ?
 				JSON.parse(cacheStr) as { isRunning: boolean; lastScan: string; startedAt: string } :
 				{isRunning: false, lastScan: "<no scan yet>", startedAt: "<not started>"}
 			;
 
 			if (isRunning) {
-				await RedisCache.getInstance()
+				await RedisCacheService.getInstance()
 					.set("scannerCache", JSON.stringify({
 						isRunning,
 						lastScan: cache.lastScan,
 						startedAt: new Date().toISOString()
 					}))
-					.catch(error => logger.error("Error setting scannerCache:", error))
+					.catch((error: any) => logger.error("Error setting scannerCache:", error))
 				;
 				logger.info("ScannerCache is running.");
 			} else {
-				await RedisCache.getInstance()
+				await RedisCacheService.getInstance()
 					.set("scannerCache", JSON.stringify({
 						isRunning,
 						lastScan: cache.startedAt,
 						startedAt: "<not started>"
 					}))
-					.catch(error => logger.error("Error setting scannerCache:", error))
+					.catch((error: any) => logger.error("Error setting scannerCache:", error))
 				;
 				logger.info("ScannerCache is stopped.");
 			}

@@ -2,39 +2,44 @@ import fs from "fs-extra";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { parseStringPromise } from "xml2js";
-import archiver from "archiver";
-import { strict as assert } from "node:assert";
+import stringSimilarity from "string-similarity";
 
 import { Logger } from "(src)/helpers/Logger";
-import { Directory, File, FileKind, generateHash, humanFileSize } from "(src)/helpers/FileUtils";
+import { ScanRootResult } from "(src)/models/interfaces/ScanRootResult";
+import {
+	cleanFilename,
+	cleanTitle,
+	generateHash,
+	getHashes,
+	getSpecialDirectorySize,
+	humanFileSize,
+	removeTrailingSeparator
+} from "(src)/utils/fileUtils";
+import { ScanResult } from "(src)/models/interfaces/ScanResult";
+import { Directory } from "(src)/models/interfaces/Directory";
+import { File, FileKind } from "(src)/models/interfaces/File";
+import { ScanRootRepository } from "(src)/repositories/ScanRootRepository";
+import { FileRepository } from "(src)/repositories/FileRepository";
+import { CalibreService } from "(src)/services/CalibreService";
+import { OpenLibraryService } from "(src)/services/OpenLibraryService";
+import { config } from "(src)/config/configuration";
 
-const logger = new Logger("Scanner");
+const logger = new Logger("Scanner Service");
 
-export interface ScanResult {
-	directories: Directory;
-	files: File[];
-	total?: number;
-}
-
-export interface ScanRootResult {
-	root: string;
-	scan: ScanResult;
-}
-
-export class Scanner {
-	private static instance: Scanner;
+export class ScannerService {
+	private static instance: ScannerService;
 	isScanning = false;
 
 	private constructor() {
 	}
 
-	public static getInstance(): Scanner {
-		if (!Scanner.instance) {
-			Scanner.instance = new Scanner();
+	public static getInstance(): ScannerService {
+		if (!ScannerService.instance) {
+			ScannerService.instance = new ScannerService();
 		}
-
-		return Scanner.instance;
+		return ScannerService.instance;
 	}
+
 
 	public async scan(rootPath: string): Promise<ScanRootResult> {
 		logger.info(`Scanning: "${rootPath}"`);
@@ -59,6 +64,82 @@ export class Scanner {
 		logger.info(`Scanning: "${result ? "Success" : "Failed"}"`);
 
 		return result;
+	}
+
+	async scanCompareUpdate(scanRootPath: string) {
+		logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
+
+		try {
+			const scanRoot = await ScanRootRepository.getInstance().getScanRootByPath(scanRootPath);
+
+			if (!scanRoot) {
+				logger.error("No scan roots found.");
+
+				return;
+			}
+
+			// - en caso de que no exista la caché de los archivos especiales, se actualiza el tamaño y se crea la cache.
+			// - puede ocurrir que la tenga que borrar por mantenimiento.
+			const specialArchives = await FileRepository.getInstance().getSpecialArchives(scanRoot.id);
+			for (const sa of specialArchives) {
+				const cachePath = path.join(__dirname, "..", "public", "cache", sa.coverId);
+				const exist = await fs.pathExists(cachePath);
+				if (!exist) {
+					logger.info(`Special archive cache not found: "${cachePath}".`);
+					sa.size = await getSpecialDirectorySize(path.join(sa.parentPath, sa.name), sa.coverId);
+					await FileRepository.getInstance().updateSpecialArchiveSize(sa.id, sa.size);
+					logger.info(`Special archive size updated: "${sa.name}" - "${sa.size}".`);
+				}
+			}
+
+			// - escanear el directorio observado.
+			const scanRootResult = await ScannerService.getInstance().scan(removeTrailingSeparator(scanRootPath));
+
+			// - obtener los hashes de los directorios.
+			const hash = getHashes(scanRootResult.scan.directories);
+
+			// - eliminar los archivos en la db que NO tengan un parentHash dentro de los hashes obtenidos.
+			const removedFilesCount = await FileRepository.getInstance().removeFileByParentHash(hash);
+			logger.info(`Removed files by parent hash: ${removedFilesCount}.`);
+
+			// - obtener los archivos de la db.
+			const hashes = await FileRepository.getInstance().getFileHashes(scanRoot.id);
+
+			const fileToRemove = hashes.filter((h: { hash: string }) =>
+				!scanRootResult.scan.files.find((file: File) => h.hash === file.fileHash));
+
+			// - eliminar los archivos en la db que NO estén en el scan.
+			if (fileToRemove.length) {
+				const removedFilesCount = await FileRepository.getInstance()
+					.removeFileByFileHash(fileToRemove.map((f: { hash: string }) => f.hash));
+				logger.info(`Removed files by file hash: ${removedFilesCount}.`);
+			}
+
+			// - los archivos del scan que no estén en la db, se insertan.
+			const newFiles = scanRootResult.scan.files.filter((file: File) =>
+				!hashes.find((h: { hash: string }) => h.hash === file.fileHash));
+
+			logger.info(`New files: ${newFiles.length}.`);
+			logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
+
+			let count = 1;
+			for (const file of newFiles) {
+				logger.info(`Updating book details info ${count++}/${newFiles.length}: "${path.join(file.parentPath, file.name)}"`);
+
+				const _file = await this.fillFileDetails(file);
+				// actualizar peso de los archivos especiales.
+				if (_file.fileKind !== FileKind.FILE && _file.fileKind !== FileKind.NONE) {
+					logger.info(`Getting special directory size: "${path.join(_file.parentPath, _file.name)}"`);
+					_file.size = await getSpecialDirectorySize(path.join(_file.parentPath, _file.name), _file.coverId);
+					logger.info(`Special directory size: "${_file.size}"`);
+				}
+				await FileRepository.getInstance().insertFile(_file, scanRoot.id);
+			}
+
+			await ScanRootRepository.getInstance().updateScanRoot(JSON.stringify(scanRootResult.scan.directories), scanRoot.id);
+		} catch (error) {
+			logger.error(`scanCompareUpdate "${scanRootPath}":`, error.message);
+		}
 	}
 
 	private async getStructureAndFiles(dirPath: string): Promise<ScanResult> {
@@ -155,37 +236,6 @@ export class Scanner {
 
 		return {directory, files};
 	}
-
-	// private async getSpecialDirectorySize(directoryPath: string, id: string): Promise<string> {
-	// 	try {
-	// 		const cachePath = path.join(__dirname, "..", "public", "cache", id);
-	// 		await fs.mkdir(cachePath, {recursive: true});
-	//
-	// 		return new Promise((resolve, reject) => {
-	// 			const outputFileName = path.join(cachePath, `${id}.zip`);
-	// 			const output = fs.createWriteStream(outputFileName);
-	// 			const archive = archiver("zip", {
-	// 				zlib: {level: 9} // Nivel de compresión
-	// 			});
-	//
-	// 			output.on("close", () => {
-	// 				resolve(humanFileSize(archive.pointer(), true)); // Devuelve el tamaño del archivo ZIP en bytes
-	// 			});
-	//
-	// 			archive.on("error", (err) => {
-	// 				reject(err); // Rechaza la promesa en caso de error
-	// 			});
-	//
-	// 			archive.pipe(output);
-	// 			archive.directory(directoryPath, false);
-	// 			archive.finalize();
-	// 		});
-	// 	} catch (error) {
-	// 		logger.error("getSpecialDirectorySize - Error reading directory:", error);
-	//
-	// 		return "0";
-	// 	}
-	// }
 
 	private async scanForSpecialDirectories(directoryPath: string): Promise<FileKind> {
 		const scanners = [
@@ -322,5 +372,34 @@ export class Scanner {
 
 			return FileKind.NONE;
 		}
+	}
+
+	private async fillFileDetails(file: File): Promise<File> {
+		try {
+			const meta = await CalibreService.getInstance().getEbookMeta(path.join(file.parentPath, file.name), file.coverId);
+
+			const filename = cleanFilename(file.name);
+			let _title = "";
+			if (meta) {
+				meta.title = (meta.title || "").trim();
+				file.localDetails = JSON.stringify(meta);
+				if (meta.title) {
+					_title = cleanTitle(meta.title);
+				}
+			}
+
+			const similarity = stringSimilarity.compareTwoStrings(filename, _title);
+
+			if (config.production.scan.openLibrary) {
+				const bookInfo = await OpenLibraryService.getInstance().getBookInfoOpenLibrary(similarity >= 0.5 ? _title : filename);
+				if (bookInfo) {
+					file.webDetails = JSON.stringify(bookInfo);
+				}
+			}
+		} catch (error) {
+			console.error(`fillFileDetails "${path.join(file.parentPath, file.name)}":`, error.message);
+		}
+
+		return file;
 	}
 }

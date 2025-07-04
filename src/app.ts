@@ -1,8 +1,5 @@
 import * as dotenv from "dotenv";
-
-dotenv.config({path: ".env"});
-
-import express, { NextFunction, Request, Response } from "express";
+import express from "express";
 import compression from "compression";
 import lusca from "lusca";
 import helmet from "helmet";
@@ -11,49 +8,52 @@ import path from "path";
 import { schedule } from "node-cron";
 import moment from "moment-timezone";
 
-import { AppRoutes } from "./routes";
-import { BooksStore } from "(src)/services/BooksStore";
 import { Logger } from "(src)/helpers/Logger";
-import * as process from "node:process"; // Routes file
+import RedisAdapter from "(src)/db/RedisAdapter";
+import { BooksService } from "(src)/services/BooksService";
+import { config } from "(src)/config/configuration";
 
-const logger = new Logger("App");
+dotenv.config({path: ".env"});
 
-const app = express();
+export async function bootstrap(): Promise<express.Express> {
+	const logger = new Logger("App");
 
-// Express configuration
-app.set("port", process.env.PORT || 3000);
-app.use(compression());
-app.use(express.json()); // parse application/json type post data
-app.use(express.urlencoded({extended: true})); // parse application/x-www-form-urlencoded post data
-app.use(express.static(path.join(__dirname, "public"), {maxAge: 31557600000}));
-app.use(lusca.xframe("SAMEORIGIN"));
-app.use(lusca.xssProtection(true));
-app.use(helmet());
-app.use(cors());
+	const app = express();
 
-AppRoutes.forEach(route => {
-	(app as any)[route.method](route.path, (request: Request, response: Response, next: NextFunction) => {
-		route.action(request, response, next)
-			.then(() => next)
-			.catch((err: any) => next(err));
+	app.use(helmet());
+	app.use(compression());
+
+	app.use(express.json());
+	app.use(express.urlencoded({extended: true}));
+
+	await RedisAdapter.initialize().catch((err) => {
+		logger.error("Error initializing RedisAdapter:", err);
+		throw new Error("Failed to initialize RedisAdapter");
 	});
-});
 
-schedule(
-	process.env.CRON_SCHEDULE || "0 */1 * * *",
-	async () => {
-		logger.info(`Executing update book info cron at ${moment(new Date()).tz("America/Lima").format("LLLL")}`);
-		BooksStore
-			.getInstance()
-			.cronUpdateBooksInfo()
-			.catch((error: any) => {
-				logger.error("Executing update book info cron:", error);
-			})
-		;
-	},
-	{
-		timezone: "America/Lima"
-	}
-);
+	app.use(cors());
+	app.use(lusca.xframe("SAMEORIGIN"));
+	app.use(lusca.xssProtection(true));
 
-export { app };
+	app.set("port", config.production.server.port);
+	app.use(express.static(path.join(__dirname, "public"), {maxAge: 31557600000}));
+
+	schedule(
+		config.production.scan.cron,
+		async () => {
+			logger.info(`Executing update book info cron at ${moment(new Date()).tz("America/Lima").format("LLLL")}`);
+			BooksService
+				.getInstance()
+				.cronUpdateBooksInfo()
+				.catch((error: any) => {
+					logger.error("Executing update book info cron:", error);
+				})
+			;
+		},
+		{
+			timezone: "America/Lima"
+		}
+	);
+
+	return app;
+}
