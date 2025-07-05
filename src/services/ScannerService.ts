@@ -66,7 +66,7 @@ export class ScannerService {
 		return result;
 	}
 
-	async scanCompareUpdate(scanRootPath: string) {
+	public async scanCompareUpdate(scanRootPath: string) {
 		logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
 
 		try {

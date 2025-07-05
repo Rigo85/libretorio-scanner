@@ -6,13 +6,21 @@ const logger = new Logger("Redis Cache Service");
 
 export class RedisCacheService {
 	private static instance: RedisCacheService;
-	private redisClient: RedisClientType;
+	private redisClient?: RedisClientType = undefined;
+	private initPromise: Promise<void>;
 
 	private constructor() {
-		RedisAdapter.initialize().then((client: RedisClientType) => {
-			this.redisClient = client;
+		this.initPromise = this.initialize();
+	}
+
+	private async initialize(): Promise<void> {
+		try {
+			this.redisClient = await RedisAdapter.initialize();
 			logger.info("Connected to Redis.");
-		});
+		} catch (error) {
+			logger.error("Error connecting to Redis:", error);
+			throw error;
+		}
 	}
 
 	public static getInstance(): RedisCacheService {
@@ -23,6 +31,8 @@ export class RedisCacheService {
 	}
 
 	public async set(key: string, value: string, expirationInSeconds?: number): Promise<void> {
+		await this.initPromise;
+
 		if (expirationInSeconds) {
 			// eslint-disable-next-line @typescript-eslint/naming-convention
 			await this.redisClient.set(key, value, {EX: expirationInSeconds});
@@ -32,6 +42,7 @@ export class RedisCacheService {
 	}
 
 	public async get(key: string): Promise<string> {
+		await this.initPromise;
 		return await this.redisClient.get(key);
 	}
 }
