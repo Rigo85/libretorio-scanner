@@ -18,7 +18,8 @@ export const config = {
 		},
 		scan: {
 			openLibrary: (process.env.CAN_USE_OPENLIBRARY_API || "false").toLowerCase() === "true",
-			cron: process.env.CRON_SCHEDULE || "0 */1 * * *"
+			cron: process.env.CRON_SCHEDULE || "0 */1 * * *",
+			action: process.env.ACTION || "update-books-info"
 		}
 	},
 	development: {}

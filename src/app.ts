@@ -12,6 +12,7 @@ import { Logger } from "(src)/helpers/Logger";
 import RedisAdapter from "(src)/db/RedisAdapter";
 import { BooksService } from "(src)/services/BooksService";
 import { config } from "(src)/config/configuration";
+import * as homeController from "(src)/controllers/home";
 
 dotenv.config({path: ".env"});
 
@@ -37,6 +38,9 @@ export async function bootstrap(): Promise<express.Express> {
 
 	app.set("port", config.production.server.port);
 	app.use(express.static(path.join(__dirname, "public"), {maxAge: 31557600000}));
+
+	app.get("/", homeController.index);
+	app.get("/check/:action", homeController.checkParameter);
 
 	schedule(
 		config.production.scan.cron,
