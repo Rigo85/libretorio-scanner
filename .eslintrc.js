@@ -26,7 +26,6 @@ module.exports = {
         "eslint-plugin-no-null",
         "eslint-plugin-jsdoc",
         "@typescript-eslint",
-        "@typescript-eslint/tslint",
         "jsdoc"
     ],
     "root": true,
@@ -82,21 +81,9 @@ module.exports = {
                 ]
             }
         ],
-        "@typescript-eslint/tslint/config": [
-            "error",
-            {
-                "rules": {
-                    "whitespace": [
-                        true,
-                        "check-branch",
-                        "check-decl",
-                        "check-operator",
-                        "check-module",
-                        "check-separator",
-                        "check-type"
-                    ]
-                }
-            }
-        ]
+        "keyword-spacing": ["error", {"before": true, "after": true}],
+        "space-infix-ops": "error",
+        "comma-spacing": ["error", {"before": false, "after": true}],
+        "semi-spacing": ["error", {"before": false, "after": true}]
     }
 };

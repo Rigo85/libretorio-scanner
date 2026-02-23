@@ -101,7 +101,7 @@ export async function getSpecialDirectorySize(directoryPath: string, id: string)
 				resolve(humanFileSize(archive.pointer(), true)); // Devuelve el tamaño del archivo ZIP en bytes
 			});
 
-			archive.on("error", (err) => {
+			archive.on("error", (err: Error) => {
 				reject(err); // Rechaza la promesa en caso de error
 			});
 
