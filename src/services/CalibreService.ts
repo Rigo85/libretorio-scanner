@@ -4,6 +4,7 @@ import path from "path";
 
 import { Logger } from "(src)/helpers/Logger";
 import { checkIfPathExistsAndIsFile } from "(src)/utils/fileUtils";
+import { convertToWebp } from "(src)/utils/imageUtils";
 
 const logger = new Logger("Calibre Service");
 const execPromise = util.promisify(exec);
@@ -37,11 +38,13 @@ export class CalibreService {
 			const {
 				stdout,
 				stderr
-			} = await execPromise(`${calibrePath} "${filePath}" --get-cover ${coverPath}`);
+			} = await execPromise(`${calibrePath} "${filePath}" --get-cover "${coverPath}"`);
 			if (stderr) {
 				logger.error(`getEbookMeta: ${stderr}`);
 				return undefined;
 			}
+
+			convertToWebp(coverPath);
 
 			return this.parseMeta(stdout);
 		} catch (error) {
