@@ -103,21 +103,25 @@ export class ScannerService {
 			logger.info(`New files: ${newFiles.length}.`);
 			logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
 
-			// - regenerar la caché (ZIP) de los archivos especiales existentes en la db.
+			// - generar la caché (ZIP) de los archivos especiales existentes solo si no existe.
 			const existingSpecials = scanRootResult.scan.files.filter(
 				(f: File) => dbHashSet.has(f.fileHash) && f.fileKind !== FileKind.FILE && f.fileKind !== FileKind.NONE
 			);
 			const specialArchives = await FileRepository.getInstance().getSpecialArchives(scanRoot.id);
 			const specialDbMap = new Map(specialArchives.map((sa: File) => [sa.fileHash, sa]));
 
-			logger.info(`Existing special archives to rebuild: ${existingSpecials.length}.`);
+			logger.info(`Existing special archives: ${existingSpecials.length}.`);
 			for (const sf of existingSpecials) {
 				const dbRecord = specialDbMap.get(sf.fileHash);
 				if (!dbRecord) continue;
-				logger.info(`Rebuilding special archive cache: "${sf.name}".`);
-				const size = await getSpecialDirectorySize(path.join(sf.parentPath, sf.name), dbRecord.coverId);
-				await FileRepository.getInstance().updateSpecialArchiveSize(dbRecord.id, size);
-				logger.info(`Special archive size updated: "${sf.name}" - "${size}".`);
+				const cachePath = path.join(__dirname, "..", "public", "cache", dbRecord.coverId);
+				const exist = await fs.pathExists(cachePath);
+				if (!exist) {
+					logger.info(`Special archive cache not found, building: "${sf.name}".`);
+					const size = await getSpecialDirectorySize(path.join(sf.parentPath, sf.name), dbRecord.coverId);
+					await FileRepository.getInstance().updateSpecialArchiveSize(dbRecord.id, size);
+					logger.info(`Special archive size updated: "${sf.name}" - "${size}".`);
+				}
 			}
 
 			const concurrency = config.production.scan.concurrency;
