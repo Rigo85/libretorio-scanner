@@ -72,18 +72,13 @@ export class ScannerService {
 				return;
 			}
 
-			// - en caso de que no exista la caché de los archivos especiales, se actualiza el tamaño y se crea la cache.
-			// - puede ocurrir que la tenga que borrar por mantenimiento.
+			// - regenerar la caché (ZIP) de los archivos especiales y actualizar el tamaño en cada ejecución.
 			const specialArchives = await FileRepository.getInstance().getSpecialArchives(scanRoot.id);
 			for (const sa of specialArchives) {
-				const cachePath = path.join(__dirname, "..", "public", "cache", sa.coverId);
-				const exist = await fs.pathExists(cachePath);
-				if (!exist) {
-					logger.info(`Special archive cache not found: "${cachePath}".`);
-					sa.size = await getSpecialDirectorySize(path.join(sa.parentPath, sa.name), sa.coverId);
-					await FileRepository.getInstance().updateSpecialArchiveSize(sa.id, sa.size);
-					logger.info(`Special archive size updated: "${sa.name}" - "${sa.size}".`);
-				}
+				logger.info(`Rebuilding special archive cache: "${sa.name}".`);
+				sa.size = await getSpecialDirectorySize(path.join(sa.parentPath, sa.name), sa.coverId);
+				await FileRepository.getInstance().updateSpecialArchiveSize(sa.id, sa.size);
+				logger.info(`Special archive size updated: "${sa.name}" - "${sa.size}".`);
 			}
 
 			// - escanear el directorio observado.
