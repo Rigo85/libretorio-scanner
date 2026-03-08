@@ -169,6 +169,7 @@ export class ScannerService {
 				const specialKind = await this.detectSpecialDirectory(entryPath, subEntries);
 
 				if (specialKind !== FileKind.NONE) {
+					logger.info(`Special directory detected: "${entry.name}" [${specialKind}]`);
 					filesList.push({
 						name: entry.name,
 						parentPath: dirPath,
