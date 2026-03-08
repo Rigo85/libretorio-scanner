@@ -48,7 +48,7 @@ export class ScannerCacheService {
 	public async isRunning(): Promise<boolean> {
 		try {
 			const hb = await RedisCacheService.getInstance().get(HEARTBEAT_KEY);
-			return hb !== null && hb !== undefined;
+			return !!hb;
 		} catch (error) {
 			logger.error("isRunning:", error);
 			return false;

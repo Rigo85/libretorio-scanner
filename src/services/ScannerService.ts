@@ -278,7 +278,7 @@ export class ScannerService {
 	private async fillWebDetails(file: File): Promise<void> {
 		if (!config.production.scan.openLibrary) return;
 		try {
-			const meta = file.localDetails ? JSON.parse(file.localDetails) : null;
+			const meta = file.localDetails ? JSON.parse(file.localDetails) : undefined;
 			const filename = cleanFilename(file.name);
 			const title = meta?.title ? cleanTitle(meta.title) : "";
 			const similarity = stringSimilarity.compareTwoStrings(filename, title);
