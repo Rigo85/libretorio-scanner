@@ -28,7 +28,6 @@ const logger = new Logger("Scanner Service");
 
 export class ScannerService {
 	private static instance: ScannerService;
-	isScanning = false;
 
 	private constructor() {
 	}
@@ -44,7 +43,6 @@ export class ScannerService {
 	public async scan(rootPath: string): Promise<ScanRootResult> {
 		logger.info(`Scanning: "${rootPath}"`);
 
-		this.isScanning = true;
 		let result = undefined;
 
 		try {
@@ -57,8 +55,6 @@ export class ScannerService {
 			} as ScanRootResult;
 		} catch (error) {
 			logger.error("Error scanning:", error);
-		} finally {
-			this.isScanning = false;
 		}
 
 		logger.info(`Scanning: "${result ? "Success" : "Failed"}"`);
@@ -105,8 +101,10 @@ export class ScannerService {
 			// - obtener los archivos de la db.
 			const hashes = await FileRepository.getInstance().getFileHashes(scanRoot.id);
 
-			const fileToRemove = hashes.filter((h: { hash: string }) =>
-				!scanRootResult.scan.files.find((file: File) => h.hash === file.fileHash));
+			const scanHashSet = new Set(scanRootResult.scan.files.map((f: File) => f.fileHash));
+			const dbHashSet = new Set(hashes.map((h: { hash: string }) => h.hash));
+
+			const fileToRemove = hashes.filter((h: { hash: string }) => !scanHashSet.has(h.hash));
 
 			// - eliminar los archivos en la db que NO estén en el scan.
 			if (fileToRemove.length) {
@@ -116,8 +114,7 @@ export class ScannerService {
 			}
 
 			// - los archivos del scan que no estén en la db, se insertan.
-			const newFiles = scanRootResult.scan.files.filter((file: File) =>
-				!hashes.find((h: { hash: string }) => h.hash === file.fileHash));
+			const newFiles = scanRootResult.scan.files.filter((file: File) => !dbHashSet.has(file.fileHash));
 
 			logger.info(`New files: ${newFiles.length}.`);
 			logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
@@ -151,19 +148,19 @@ export class ScannerService {
 
 		const filesList = [] as File[];
 
-		const items = await fs.readdir(dirPath);
+		const items = await fs.readdir(dirPath, {withFileTypes: true});
 
 		for (const item of items) {
-			const itemPath = path.join(dirPath, item);
-			const stats = await fs.stat(itemPath);
+			const itemPath = path.join(dirPath, item.name);
 
-			if (stats.isDirectory()) {
+			if (item.isDirectory()) {
 				const subdirectoryStructure = await this.getStructureAndFiles(itemPath);
 				structure.directories.push(subdirectoryStructure.directories);
 				filesList.push(...subdirectoryStructure.files);
-			} else if (stats.isFile()) {
+			} else if (item.isFile()) {
+				const stats = await fs.stat(itemPath);
 				filesList.push({
-					name: item,
+					name: item.name,
 					parentPath: dirPath,
 					parentHash: generateHash(dirPath),
 					fileHash: generateHash(itemPath, true),
@@ -267,38 +264,29 @@ export class ScannerService {
 		let foundExtension: string = undefined;
 
 		try {
-			const files = await fs.readdir(directoryPath);
+			const entries = await fs.readdir(directoryPath, {withFileTypes: true});
 
-			for (const file of files) {
-				const filePath = path.join(directoryPath, file);
-				const stat = await fs.stat(filePath);
-
-				if (!stat.isFile()) {
-					// logger.error(`scanForFolderOfFormat - "${filePath}" is not a file.`);
-
-					return FileKind.NONE; // No es un archivo
+			for (const entry of entries) {
+				if (!entry.isFile()) {
+					return FileKind.NONE;
 				}
 
-				const extension = path.extname(file).toLowerCase().slice(1);
+				const extension = path.extname(entry.name).toLowerCase().slice(1);
 
 				if (!allowedExtensions.has(extension)) {
-					// logger.error(`scanForFolderOfFormat - "${file}" has an invalid extension.`);
-
-					return FileKind.NONE; // Extensión no permitida
+					return FileKind.NONE;
 				}
 
 				if (strict) {
 					if (!foundExtension) {
 						foundExtension = extension;
 					} else if (foundExtension !== extension) {
-						// logger.error(`scanForFolderOfFormat - "${file}" has a different extension of "${foundExtension || "none"}".`);
-
-						return FileKind.NONE; // Las extensiones no coinciden
+						return FileKind.NONE;
 					}
 				}
 			}
 
-			return files.length ? format : FileKind.NONE;
+			return entries.length ? format : FileKind.NONE;
 		} catch (error) {
 			logger.error("scanForFolderOfFormat - Error reading directory:", error);
 

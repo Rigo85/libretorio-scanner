@@ -45,4 +45,9 @@ export class RedisCacheService {
 		await this.initPromise;
 		return await this.redisClient.get(key);
 	}
+
+	public async del(key: string): Promise<void> {
+		await this.initPromise;
+		await this.redisClient.del(key);
+	}
 }

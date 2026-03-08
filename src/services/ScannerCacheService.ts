@@ -3,8 +3,13 @@ import { RedisCacheService } from "(src)/services/RedisCacheService";
 
 const logger = new Logger("ScannerCache Service");
 
+const HEARTBEAT_KEY = "scannerHeartbeat";
+const HEARTBEAT_INTERVAL_MS = 60_000;  // renew every 60 s
+const HEARTBEAT_TTL_S = 120;           // key lives 2× interval; dies if process crashes
+
 export class ScannerCacheService {
 	private static instance: ScannerCacheService;
+	private heartbeatTimer?: NodeJS.Timeout;
 
 	private constructor() {
 		RedisCacheService.getInstance()
@@ -42,17 +47,31 @@ export class ScannerCacheService {
 
 	public async isRunning(): Promise<boolean> {
 		try {
-			const value = await RedisCacheService.getInstance().get("scannerCache");
-			if (value) {
-				const cache = JSON.parse(value) as { isRunning: boolean; lastScan: string; startedAt: string };
-				return cache.isRunning;
-			}
-			return false;
+			const hb = await RedisCacheService.getInstance().get(HEARTBEAT_KEY);
+			return hb !== null && hb !== undefined;
 		} catch (error) {
 			logger.error("isRunning:", error);
-
 			return false;
 		}
+	}
+
+	public async startHeartbeat(): Promise<void> {
+		await this.writeHeartbeat();
+		this.heartbeatTimer = setInterval(() => {
+			this.writeHeartbeat().catch((err: any) => logger.error("heartbeat write error:", err));
+		}, HEARTBEAT_INTERVAL_MS);
+	}
+
+	public async stopHeartbeat(): Promise<void> {
+		if (this.heartbeatTimer) {
+			clearInterval(this.heartbeatTimer);
+			this.heartbeatTimer = undefined;
+		}
+		await RedisCacheService.getInstance().del(HEARTBEAT_KEY);
+	}
+
+	private async writeHeartbeat(): Promise<void> {
+		await RedisCacheService.getInstance().set(HEARTBEAT_KEY, new Date().toISOString(), HEARTBEAT_TTL_S);
 	}
 
 	public async setRunning(isRunning: boolean): Promise<void> {

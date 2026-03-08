@@ -35,6 +35,7 @@ export class BooksService {
 		}
 
 		await ScannerCacheService.getInstance().setRunning(true);
+		await ScannerCacheService.getInstance().startHeartbeat();
 
 		try {
 			await ScannerService.getInstance().scanCompareUpdate(dbScanRoots[0].path);
@@ -42,6 +43,7 @@ export class BooksService {
 		} catch (error) {
 			logger.error("cronUpdateBooksInfo:", error);
 		} finally {
+			await ScannerCacheService.getInstance().stopHeartbeat();
 			await ScannerCacheService.getInstance().setRunning(false);
 		}
 	}
