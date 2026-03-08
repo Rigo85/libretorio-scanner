@@ -72,15 +72,6 @@ export class ScannerService {
 				return;
 			}
 
-			// - regenerar la caché (ZIP) de los archivos especiales y actualizar el tamaño en cada ejecución.
-			const specialArchives = await FileRepository.getInstance().getSpecialArchives(scanRoot.id);
-			for (const sa of specialArchives) {
-				logger.info(`Rebuilding special archive cache: "${sa.name}".`);
-				sa.size = await getSpecialDirectorySize(path.join(sa.parentPath, sa.name), sa.coverId);
-				await FileRepository.getInstance().updateSpecialArchiveSize(sa.id, sa.size);
-				logger.info(`Special archive size updated: "${sa.name}" - "${sa.size}".`);
-			}
-
 			// - escanear el directorio observado.
 			const scanRootResult = await ScannerService.getInstance().scan(removeTrailingSeparator(scanRootPath));
 
@@ -111,6 +102,23 @@ export class ScannerService {
 
 			logger.info(`New files: ${newFiles.length}.`);
 			logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
+
+			// - regenerar la caché (ZIP) de los archivos especiales existentes en la db.
+			const existingSpecials = scanRootResult.scan.files.filter(
+				(f: File) => dbHashSet.has(f.fileHash) && f.fileKind !== FileKind.FILE && f.fileKind !== FileKind.NONE
+			);
+			const specialArchives = await FileRepository.getInstance().getSpecialArchives(scanRoot.id);
+			const specialDbMap = new Map(specialArchives.map((sa: File) => [sa.fileHash, sa]));
+
+			logger.info(`Existing special archives to rebuild: ${existingSpecials.length}.`);
+			for (const sf of existingSpecials) {
+				const dbRecord = specialDbMap.get(sf.fileHash);
+				if (!dbRecord) continue;
+				logger.info(`Rebuilding special archive cache: "${sf.name}".`);
+				const size = await getSpecialDirectorySize(path.join(sf.parentPath, sf.name), dbRecord.coverId);
+				await FileRepository.getInstance().updateSpecialArchiveSize(dbRecord.id, size);
+				logger.info(`Special archive size updated: "${sf.name}" - "${size}".`);
+			}
 
 			const concurrency = config.production.scan.concurrency;
 
