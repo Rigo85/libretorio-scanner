@@ -1,5 +1,6 @@
 import fs from "fs-extra";
 import path from "path";
+import { Dirent } from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { parseStringPromise } from "xml2js";
 import stringSimilarity from "string-similarity";
@@ -39,15 +40,13 @@ export class ScannerService {
 		return ScannerService.instance;
 	}
 
-
 	public async scan(rootPath: string): Promise<ScanRootResult> {
 		logger.info(`Scanning: "${rootPath}"`);
 
 		let result = undefined;
 
 		try {
-			let scanResult = await this.getStructureAndFiles(rootPath);
-			scanResult = await this.scanForParticularKindOfFiles(scanResult, rootPath);
+			const scanResult = await this.getStructureAndFiles(rootPath);
 
 			result = {
 				root: rootPath,
@@ -70,7 +69,6 @@ export class ScannerService {
 
 			if (!scanRoot) {
 				logger.error("No scan roots found.");
-
 				return;
 			}
 
@@ -108,9 +106,9 @@ export class ScannerService {
 
 			// - eliminar los archivos en la db que NO estén en el scan.
 			if (fileToRemove.length) {
-				const removedFilesCount = await FileRepository.getInstance()
+				const removedCount = await FileRepository.getInstance()
 					.removeFileByFileHash(fileToRemove.map((f: { hash: string }) => f.hash));
-				logger.info(`Removed files by file hash: ${removedFilesCount}.`);
+				logger.info(`Removed files by file hash: ${removedCount}.`);
 			}
 
 			// - los archivos del scan que no estén en la db, se insertan.
@@ -119,19 +117,27 @@ export class ScannerService {
 			logger.info(`New files: ${newFiles.length}.`);
 			logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
 
-			let count = 1;
-			for (const file of newFiles) {
-				logger.info(`Updating book details info ${count++}/${newFiles.length}: "${path.join(file.parentPath, file.name)}"`);
+			const concurrency = config.production.scan.concurrency;
 
-				const _file = await this.fillFileDetails(file);
-				// actualizar peso de los archivos especiales.
-				if (_file.fileKind !== FileKind.FILE && _file.fileKind !== FileKind.NONE) {
-					logger.info(`Getting special directory size: "${path.join(_file.parentPath, _file.name)}"`);
-					_file.size = await getSpecialDirectorySize(path.join(_file.parentPath, _file.name), _file.coverId);
-					logger.info(`Special directory size: "${_file.size}"`);
+			// Phase 1: local metadata via calibre + special dir size (CPU/disk bound)
+			logger.info(`Phase 1 — local metadata for ${newFiles.length} files (concurrency: ${concurrency})`);
+			await this.processConcurrently(newFiles, async (file, idx) => {
+				logger.info(`Local metadata ${idx + 1}/${newFiles.length}: "${path.join(file.parentPath, file.name)}"`);
+				await this.fillLocalDetails(file);
+				if (file.fileKind !== FileKind.FILE && file.fileKind !== FileKind.NONE) {
+					logger.info(`Getting special directory size: "${path.join(file.parentPath, file.name)}"`);
+					file.size = await getSpecialDirectorySize(path.join(file.parentPath, file.name), file.coverId);
+					logger.info(`Special directory size: "${file.size}"`);
 				}
-				await FileRepository.getInstance().insertFile(_file, scanRoot.id);
-			}
+			}, concurrency);
+
+			// Phase 2: web metadata via OpenLibrary + DB insert (network bound)
+			logger.info(`Phase 2 — web metadata for ${newFiles.length} files (concurrency: ${concurrency})`);
+			await this.processConcurrently(newFiles, async (file, idx) => {
+				logger.info(`Web metadata ${idx + 1}/${newFiles.length}: "${file.name}"`);
+				await this.fillWebDetails(file);
+				await FileRepository.getInstance().insertFile(file, scanRoot.id);
+			}, concurrency);
 
 			await ScanRootRepository.getInstance().updateScanRoot(JSON.stringify(scanRootResult.scan.directories), scanRoot.id);
 		} catch (error) {
@@ -139,31 +145,48 @@ export class ScannerService {
 		}
 	}
 
-	private async getStructureAndFiles(dirPath: string): Promise<ScanResult> {
+	// Single-pass recursive scan. Detects special directories on first encounter,
+	// so each directory is read from disk exactly once.
+	private async getStructureAndFiles(dirPath: string, dirEntries?: Dirent[]): Promise<ScanResult> {
+		const dirHash = generateHash(dirPath);
 		const structure: Directory = {
 			name: path.basename(dirPath),
-			hash: generateHash(dirPath),
+			hash: dirHash,
 			directories: [] as Directory[]
 		};
+		const filesList: File[] = [];
 
-		const filesList = [] as File[];
+		const entries = dirEntries ?? await fs.readdir(dirPath, {withFileTypes: true});
 
-		const items = await fs.readdir(dirPath, {withFileTypes: true});
+		for (const entry of entries) {
+			const entryPath = path.join(dirPath, entry.name);
 
-		for (const item of items) {
-			const itemPath = path.join(dirPath, item.name);
+			if (entry.isDirectory()) {
+				const subEntries = await fs.readdir(entryPath, {withFileTypes: true});
+				const specialKind = await this.detectSpecialDirectory(entryPath, subEntries);
 
-			if (item.isDirectory()) {
-				const subdirectoryStructure = await this.getStructureAndFiles(itemPath);
-				structure.directories.push(subdirectoryStructure.directories);
-				filesList.push(...subdirectoryStructure.files);
-			} else if (item.isFile()) {
-				const stats = await fs.stat(itemPath);
+				if (specialKind !== FileKind.NONE) {
+					filesList.push({
+						name: entry.name,
+						parentPath: dirPath,
+						parentHash: dirHash,
+						fileHash: generateHash(entryPath),
+						size: "0",
+						coverId: uuidv4(),
+						fileKind: specialKind
+					});
+				} else {
+					const subdirResult = await this.getStructureAndFiles(entryPath, subEntries);
+					structure.directories.push(subdirResult.directories);
+					filesList.push(...subdirResult.files);
+				}
+			} else if (entry.isFile()) {
+				const stats = await fs.stat(entryPath);
 				filesList.push({
-					name: item.name,
+					name: entry.name,
 					parentPath: dirPath,
-					parentHash: generateHash(dirPath),
-					fileHash: generateHash(itemPath, true),
+					parentHash: dirHash,
+					fileHash: generateHash(entryPath, true),
 					size: humanFileSize(stats.size, true),
 					coverId: uuidv4(),
 					fileKind: FileKind.FILE
@@ -174,220 +197,99 @@ export class ScannerService {
 		return {directories: structure, files: filesList};
 	}
 
-	private async scanForParticularKindOfFiles(scanResult: ScanResult, dirPath: string): Promise<ScanResult> {
-		const {directory, files} = await this._helper(scanResult.directories, scanResult.files, dirPath);
-
-		return {directories: directory, files} as ScanResult;
+	private async detectSpecialDirectory(dirPath: string, entries: Dirent[]): Promise<FileKind> {
+		if (this.matchesFolderFormat(entries, new Set(["jpg", "jpeg", "png", "webp", "gif"]), true)) {
+			return FileKind.COMIC_MANGA;
+		}
+		if (this.matchesFolderFormat(entries, new Set(["mp3", "wav", "m4a", "m4b", "ogg"]), false)) {
+			return FileKind.AUDIOBOOK;
+		}
+		return this.checkEpubDir(dirPath, entries);
 	}
 
-	private async _helper(directory: Directory, files: File[], dirPath: string
-	): Promise<{ directory: Directory; files: File[] }> {
-
-		const directories = directory.directories as Directory[];
-		const results = [] as { directory: Directory; fileKind: FileKind }[];
-
-		for (const directory of directories) {
-			const directoryPath = path.join(dirPath, directory.name);
-			const fileKind = await this.scanForSpecialDirectories(directoryPath);
-
-			if (fileKind !== FileKind.NONE) {
-				results.push({directory, fileKind});
-			}
-		}
-
-		// logger.info(`dirPath: ${dirPath} - results: ${JSON.stringify(results)}`);
-
-		for (const result of results) {
-			const index = directories.findIndex((directory: Directory) => directory.name === result.directory.name);
-
-			if (index > -1) {
-				const [specialDirectory] = directories.splice(index, 1);
-				logger.info("Special directory:", JSON.stringify(specialDirectory));
-				const id = uuidv4();
-				files.push({
-					name: specialDirectory.name,
-					parentPath: dirPath,
-					parentHash: generateHash(dirPath),
-					fileHash: generateHash(path.join(dirPath, specialDirectory.name)),
-					// size: await this.getSpecialDirectorySize(path.join(dirPath, specialDirectory.name), id), // compactar la carpeta y obtener el peso, ese compactado será la descarga.
-					size: "0",
-					coverId: id,
-					fileKind: result.fileKind
-				});
-
-				for (let i = files.length - 1; i >= 0; i--) {
-					const fileParentPath = path.normalize(files[i].parentPath);
-					const specialDirPath = path.normalize(path.join(dirPath, specialDirectory.name));
-					if (fileParentPath.startsWith(specialDirPath)) {
-						files.splice(i, 1);
-					}
+	// Checks if all entries are files with allowed extensions. If strict, all must share the same extension.
+	private matchesFolderFormat(entries: Dirent[], allowed: Set<string>, strict: boolean): boolean {
+		if (entries.length === 0) return false;
+		let foundExt: string | undefined;
+		for (const entry of entries) {
+			if (!entry.isFile()) return false;
+			const ext = path.extname(entry.name).toLowerCase().slice(1);
+			if (!allowed.has(ext)) return false;
+			if (strict) {
+				if (!foundExt) {
+					foundExt = ext;
+				} else if (foundExt !== ext) {
+					return false;
 				}
 			}
 		}
-
-		for (const _directory of directories) {
-			// logger.info(`${_directory.name} - files length b4: ${files.length}`);
-			await this._helper(_directory, files, path.join(dirPath, _directory.name));
-			// logger.info(`${_directory.name} - files length after: ${files.length}`);
-		}
-
-		return {directory, files};
+		return true;
 	}
 
-	private async scanForSpecialDirectories(directoryPath: string): Promise<FileKind> {
-		const scanners = [
-			this.scanForComics.bind(this),
-			this.scanForEpubs.bind(this),
-			this.scanForAudioBooks.bind(this)
-		];
-
-		for (const scanner of scanners) {
-			const fileKind = await scanner(directoryPath);
-			if (fileKind !== FileKind.NONE) {
-				return fileKind;
-			}
-		}
-
-		return FileKind.NONE;
-	}
-
-	private async scanForComics(directoryPath: string): Promise<FileKind> {
-		return await this.scanForFolderOfFormat(directoryPath, ["jpg", "jpeg", "png", "webp", "gif"], FileKind.COMIC_MANGA);
-	}
-
-	private async scanForAudioBooks(directoryPath: string): Promise<FileKind> {
-		return await this.scanForFolderOfFormat(directoryPath, ["mp3", "wav", "m4a", "m4b", "ogg"], FileKind.AUDIOBOOK, false);
-	}
-
-	private async scanForFolderOfFormat(directoryPath: string, extensions: string[], format: FileKind, strict: boolean = true): Promise<FileKind> {
-		const allowedExtensions = new Set(extensions || []);
-		let foundExtension: string = undefined;
+	// Uses the already-read entries to skip pathExists calls; only reads file content when structure looks valid.
+	private async checkEpubDir(dirPath: string, entries: Dirent[]): Promise<FileKind> {
+		if (!entries.some(e => e.isFile() && e.name === "mimetype")) return FileKind.NONE;
+		if (!entries.some(e => e.isDirectory() && e.name === "META-INF")) return FileKind.NONE;
 
 		try {
-			const entries = await fs.readdir(directoryPath, {withFileTypes: true});
+			const mimetypeContent = (await fs.readFile(path.join(dirPath, "mimetype"), "utf-8")).trim();
+			if (mimetypeContent !== "application/epub+zip") return FileKind.NONE;
 
-			for (const entry of entries) {
-				if (!entry.isFile()) {
-					return FileKind.NONE;
-				}
+			const containerXml = await fs.readFile(path.join(dirPath, "META-INF", "container.xml"), "utf-8");
+			const parsed = await parseStringPromise(containerXml);
+			const rootFile = parsed.container?.rootfiles?.[0]?.rootfile?.[0];
+			if (!rootFile?.$?.["full-path"]) return FileKind.NONE;
 
-				const extension = path.extname(entry.name).toLowerCase().slice(1);
-
-				if (!allowedExtensions.has(extension)) {
-					return FileKind.NONE;
-				}
-
-				if (strict) {
-					if (!foundExtension) {
-						foundExtension = extension;
-					} else if (foundExtension !== extension) {
-						return FileKind.NONE;
-					}
-				}
-			}
-
-			return entries.length ? format : FileKind.NONE;
-		} catch (error) {
-			logger.error("scanForFolderOfFormat - Error reading directory:", error);
-
+			const opfExists = await fs.pathExists(path.join(dirPath, rootFile.$["full-path"]));
+			return opfExists ? FileKind.EPUB : FileKind.NONE;
+		} catch {
 			return FileKind.NONE;
 		}
 	}
 
-	private async scanForEpubs(directoryPath: string): Promise<FileKind> {
-		try {
-			// 1. Verificar el archivo mimetype
-			const mimetypePath = path.join(directoryPath, "mimetype");
-			const mimetypeExists = await fs.pathExists(mimetypePath);
-			if (!mimetypeExists) {
-				// logger.error(`scanForEpubs - "${mimetypePath}" does not exist.`);
-
-				return FileKind.NONE;
+	// Runs fn over items with at most `concurrency` items in flight simultaneously.
+	private async processConcurrently<T>(
+		items: T[],
+		fn: (item: T, index: number) => Promise<void>,
+		concurrency: number
+	): Promise<void> {
+		let i = 0;
+		const worker = async () => {
+			while (i < items.length) {
+				const idx = i++;
+				await fn(items[idx], idx);
 			}
-			const mimetypeContent = (await fs.readFile(mimetypePath, "utf-8")).trim();
-			if (mimetypeContent !== "application/epub+zip") {
-				// logger.error(`scanForEpubs - "${mimetypePath}" has an invalid content.`);
-
-				return FileKind.NONE;
-			}
-
-			// 2. Verificar el directorio META-INF y el archivo container.xml
-			const metaInfPath = path.join(directoryPath, "META-INF");
-			const containerXmlPath = path.join(metaInfPath, "container.xml");
-			const containerXmlExists = await fs.pathExists(containerXmlPath);
-			if (!containerXmlExists) {
-				// logger.error(`scanForEpubs - "${containerXmlPath}" does not exist.`);
-
-				return FileKind.NONE;
-			}
-
-			// 3. Leer y analizar el archivo container.xml para encontrar el archivo .opf
-			const containerXmlContent = await fs.readFile(containerXmlPath, "utf-8");
-			let opfFilePath: string;
-			try {
-				const parsedXml = await parseStringPromise(containerXmlContent);
-				// logger.info(JSON.stringify(parsedXml));
-				const rootFile = parsedXml.container?.rootfiles?.[0]?.rootfile?.[0];
-				if (rootFile && rootFile.$ && rootFile.$["full-path"]) {
-					opfFilePath = rootFile.$["full-path"];
-				} else {
-					return FileKind.NONE; // Fallar si no se encuentra la ruta al OPF
-				}
-			} catch (error) {
-				// logger.error(`scanForEpubs - Error parsing "${containerXmlPath}":`, error);
-
-				return FileKind.NONE;
-			}
-
-			// 4. Verificar la existencia del archivo .opf
-			if (!opfFilePath) {
-				// logger.error(`scanForEpubs - "${containerXmlPath}" does not contain a valid .opf file path.`);
-				return FileKind.NONE;
-			}
-
-			const opfAbsolutePath = path.join(directoryPath, opfFilePath);
-			const opfExists = await fs.pathExists(opfAbsolutePath);
-			if (!opfExists) {
-				// logger.error(`scanForEpubs - "${opfAbsolutePath}" does not exist.`);
-
-				return FileKind.NONE;
-			}
-
-			// Si se pasan todas las verificaciones, es un EPUB válido
-			return FileKind.EPUB;
-		} catch (error) {
-			logger.error("scanForEpubs - Error reading directory:", error);
-
-			return FileKind.NONE;
-		}
+		};
+		await Promise.all(Array.from({length: Math.min(concurrency, items.length)}, worker));
 	}
 
-	private async fillFileDetails(file: File): Promise<File> {
+	private async fillLocalDetails(file: File): Promise<void> {
 		try {
 			const meta = await CalibreService.getInstance().getEbookMeta(path.join(file.parentPath, file.name), file.coverId);
-
-			const filename = cleanFilename(file.name);
-			let _title = "";
 			if (meta) {
 				meta.title = (meta.title || "").trim();
 				file.localDetails = JSON.stringify(meta);
-				if (meta.title) {
-					_title = cleanTitle(meta.title);
-				}
-			}
-
-			const similarity = stringSimilarity.compareTwoStrings(filename, _title);
-
-			if (config.production.scan.openLibrary) {
-				const bookInfo = await OpenLibraryService.getInstance().getBookInfoOpenLibrary(similarity >= 0.5 ? _title : filename);
-				if (bookInfo) {
-					file.webDetails = JSON.stringify(bookInfo);
-				}
 			}
 		} catch (error) {
-			console.error(`fillFileDetails "${path.join(file.parentPath, file.name)}":`, error.message);
+			logger.error(`fillLocalDetails "${path.join(file.parentPath, file.name)}":`, error.message);
 		}
+	}
 
-		return file;
+	private async fillWebDetails(file: File): Promise<void> {
+		if (!config.production.scan.openLibrary) return;
+		try {
+			const meta = file.localDetails ? JSON.parse(file.localDetails) : null;
+			const filename = cleanFilename(file.name);
+			const title = meta?.title ? cleanTitle(meta.title) : "";
+			const similarity = stringSimilarity.compareTwoStrings(filename, title);
+			const bookInfo = await OpenLibraryService.getInstance().getBookInfoOpenLibrary(
+				similarity >= 0.5 ? title : filename
+			);
+			if (bookInfo) {
+				file.webDetails = JSON.stringify(bookInfo);
+			}
+		} catch (error) {
+			logger.error(`fillWebDetails "${path.join(file.parentPath, file.name)}":`, error.message);
+		}
 	}
 }
