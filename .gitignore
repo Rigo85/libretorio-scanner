@@ -33,6 +33,7 @@ Thumbs.db
 
 # Ignore built ts files
 dist/**/*
+native/worker/build/
 
 .env.project.*
 
