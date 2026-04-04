@@ -33,6 +33,9 @@ const logger = new Logger("Scanner Service");
 
 export class ScannerService {
 	private static instance: ScannerService;
+	private static readonly candidateProgressSmallBatch = 10;
+	private static readonly candidateProgressMediumBatch = 25;
+	private static readonly candidateProgressLargeBatch = 100;
 
 	private constructor() {
 	}
@@ -151,21 +154,30 @@ export class ScannerService {
 					);
 				}
 			}, concurrency);
+			logger.info(
+				`Phase 1 complete metadataCompleted="${metadataCompleted}" inserted="${insertCompleted}" failed="${insertFailed}".`
+			);
 
+			const candidatePreparationStartedAt = Date.now();
+			logger.info(
+				`Preparing cache candidate inputs scanFiles="${scanRootResult.scan.files.length}" existingDbFiles="${currentDbFiles.length}" newInsertedFiles="${insertedNewFiles.length}".`
+			);
 			const currentDbFilesMap = new Map(currentDbFiles.map((file: File) => [file.fileHash, file]));
-			const existingEligibleSources = scanRootResult.scan.files
+			const existingDbBackedFiles = scanRootResult.scan.files
 				.filter((file: File) => dbHashSet.has(file.fileHash))
 				.map((file: File) => currentDbFilesMap.get(file.fileHash))
 				.filter((file: File | undefined): file is File => file !== undefined)
-				.map((file: File) => toEligibleComicSource(file))
-				.filter((source: EligibleComicSource | undefined): source is EligibleComicSource => source !== undefined)
 			;
+			logger.info(
+				`Cache candidate inputs ready existing="${existingDbBackedFiles.length}" new="${insertedNewFiles.length}" elapsedMs="${Date.now() - candidatePreparationStartedAt}".`
+			);
+			const existingEligibleSources = this.resolveEligibleComicSources(existingDbBackedFiles, "existing");
+			const newEligibleSources = this.resolveEligibleComicSources(insertedNewFiles, "new");
 
-			const newEligibleSources = insertedNewFiles
-				.map((file: File) => toEligibleComicSource(file))
-				.filter((source: EligibleComicSource | undefined): source is EligibleComicSource => source !== undefined)
-			;
-
+			const zipOnlyClassificationStartedAt = Date.now();
+			logger.info(
+				`Resolving ZIP-only special directories existingPool="${currentDbFiles.length}" newPool="${insertedNewFiles.length}".`
+			);
 			const existingZipOnlySpecials = currentDbFiles
 				.filter((file: File) => SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file))
 			;
@@ -173,6 +185,9 @@ export class ScannerService {
 				.filter((file: File) => SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file))
 			;
 			const zipOnlySpecials = [...existingZipOnlySpecials, ...newZipOnlySpecials];
+			logger.info(
+				`ZIP-only special directories resolved existing="${existingZipOnlySpecials.length}" new="${newZipOnlySpecials.length}" total="${zipOnlySpecials.length}" elapsedMs="${Date.now() - zipOnlyClassificationStartedAt}".`
+			);
 			let specialArtifactReadyCount = 0;
 			let specialArtifactSkippedCount = 0;
 			let specialArtifactErrorCount = 0;
@@ -345,6 +360,55 @@ export class ScannerService {
 			}
 		};
 		await Promise.all(Array.from({length: Math.min(concurrency, items.length)}, worker));
+	}
+
+	private resolveEligibleComicSources(
+		files: File[],
+		scope: "existing" | "new"
+	): EligibleComicSource[] {
+		const total = files.length;
+		const progressEvery = this.getCandidateProgressEvery(total);
+		const startedAt = Date.now();
+		const sources: EligibleComicSource[] = [];
+		let skipped = 0;
+
+		logger.info(`Resolving comic cache candidates scope="${scope}" total="${total}".`);
+
+		for (let index = 0; index < files.length; index++) {
+			const file = files[index];
+			const source = toEligibleComicSource(file);
+
+			if (source) {
+				sources.push(source);
+			} else {
+				skipped++;
+			}
+
+			const completed = index + 1;
+			if (completed === total || completed % progressEvery === 0) {
+				logger.info(
+					`Candidate resolution progress scope="${scope}" completed="${completed}/${total}" eligible="${sources.length}" skipped="${skipped}" path="${path.join(file.parentPath, file.name)}".`
+				);
+			}
+		}
+
+		logger.info(
+			`Candidate resolution complete scope="${scope}" total="${total}" eligible="${sources.length}" skipped="${skipped}" elapsedMs="${Date.now() - startedAt}".`
+		);
+
+		return sources;
+	}
+
+	private getCandidateProgressEvery(total: number): number {
+		if (total <= 50) {
+			return ScannerService.candidateProgressSmallBatch;
+		}
+
+		if (total <= 250) {
+			return ScannerService.candidateProgressMediumBatch;
+		}
+
+		return ScannerService.candidateProgressLargeBatch;
 	}
 
 	private async fillLocalDetails(file: File): Promise<void> {

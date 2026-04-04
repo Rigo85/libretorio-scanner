@@ -19,6 +19,57 @@ describe("ScannerService orchestration", () => {
 		jest.restoreAllMocks();
 	});
 
+	it("logs cache candidate resolution progress when there are no new files", async () => {
+		const existingComicFile = {
+			id: 21,
+			name: "backlog.cbz",
+			parentPath: "/library",
+			parentHash: "parent-backlog",
+			fileHash: "hash-backlog",
+			size: "10 MB",
+			coverId: "cover-backlog",
+			fileKind: FileKind.FILE
+		};
+		const consoleSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+
+		jest.spyOn(ScanRootRepository.getInstance(), "getScanRootByPath")
+			.mockResolvedValue({id: 3, path: "/library"} as never);
+		jest.spyOn(comicCacheUtils, "cleanupCacheBuildRoot").mockResolvedValue(0);
+		jest.spyOn(scanner, "scan").mockResolvedValue({
+			root: "/library",
+			scan: {
+				directories: {
+					name: "library",
+					hash: "root-hash",
+					directories: []
+				},
+				files: [existingComicFile]
+			}
+		});
+		jest.spyOn(FileRepository.getInstance(), "removeFileByParentHash").mockResolvedValue(0);
+		jest.spyOn(FileRepository.getInstance(), "getFilesForCacheBuild").mockResolvedValue([existingComicFile]);
+		jest.spyOn(FileRepository.getInstance(), "removeFileByFileHash").mockResolvedValue(0);
+		jest.spyOn(ScanRootRepository.getInstance(), "updateScanRoot").mockResolvedValue(undefined as never);
+		jest.spyOn(SpecialDirectoryArtifactService.getInstance(), "ensureArtifactsForFiles").mockResolvedValue([]);
+		jest.spyOn(ComicChunkCacheService.getInstance(), "ensureCacheForSources").mockResolvedValue([{
+			coverId: "cover-backlog",
+			status: "skipped",
+			totalPages: 12,
+			chunkCount: 2,
+			elapsedMs: 1
+		}]);
+
+		await scanner.scanCompareUpdate("/library");
+
+		const joinedLogs = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+		expect(joinedLogs).toContain("Phase 1 complete metadataCompleted=\"0\" inserted=\"0\" failed=\"0\".");
+		expect(joinedLogs).toContain("Preparing cache candidate inputs scanFiles=\"1\" existingDbFiles=\"1\" newInsertedFiles=\"0\".");
+		expect(joinedLogs).toContain("Resolving comic cache candidates scope=\"existing\" total=\"1\".");
+		expect(joinedLogs).toContain("Candidate resolution progress scope=\"existing\" completed=\"1/1\" eligible=\"1\" skipped=\"0\" path=\"/library/backlog.cbz\".");
+		expect(joinedLogs).toContain("Candidate resolution complete scope=\"existing\" total=\"1\" eligible=\"1\" skipped=\"0\"");
+		expect(joinedLogs).toContain("Resolving comic cache candidates scope=\"new\" total=\"0\".");
+	});
+
 	it("still resolves metadata and inserts new files even when comic cache is already ready or skipped", async () => {
 		const newComicFile = {
 			name: "chapter.cbz",
