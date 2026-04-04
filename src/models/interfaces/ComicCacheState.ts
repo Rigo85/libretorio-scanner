@@ -1,0 +1,16 @@
+import { ComicArchiveFormat, ComicSourceType } from "(src)/models/interfaces/EligibleComicSource";
+
+export interface ComicCacheState {
+	version: 1;
+	status: "building" | "ready" | "error";
+	sourcePath: string;
+	sourceType: ComicSourceType;
+	archiveFormat?: ComicArchiveFormat;
+	createdAt: string;
+	updatedAt: string;
+	chunkCount: number;
+	totalPages: number;
+	zipReady: boolean;
+	chunksReady: boolean;
+	lastError?: string;
+}
