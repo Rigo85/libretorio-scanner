@@ -251,7 +251,10 @@ export class NativeComicCacheWorkerService {
 			let manifestPath: string | undefined = undefined;
 			let manifest: NativeWorkerManifest | undefined = undefined;
 			let progressLogStep = 0;
-			const inputPath = this.readCliValue(args, "--input") || this.readCliValue(args, "--input-dir") || "";
+			const inputFilePath = this.readCliValue(args, "--input");
+			const inputDirPath = this.readCliValue(args, "--input-dir");
+			const isDirectorySource = Boolean(inputDirPath);
+			const inputPath = inputFilePath || inputDirPath || "";
 
 			this.attachLineReader(proc.stdout, (line) => {
 				const event = this.parseWorkerEvent(line);
@@ -261,9 +264,15 @@ export class NativeComicCacheWorkerService {
 				}
 
 				if (event.type === "start") {
-					logger.info(
-						`worker-start coverId="${coverId}" backend="${event.backend || backend}" input="${event.input || inputPath}".`
-					);
+					if (isDirectorySource) {
+						logger.info(
+							`worker-start coverId="${coverId}" sourceType="directory" input="${event.input || inputPath}".`
+						);
+					} else {
+						logger.info(
+							`worker-start coverId="${coverId}" backend="${event.backend || backend}" input="${event.input || inputPath}".`
+						);
+					}
 					return;
 				}
 
@@ -291,9 +300,15 @@ export class NativeComicCacheWorkerService {
 					detectedBackend = this.normalizeWorkerBackend(event.backend) || backend;
 					manifestPath = event.manifestPath;
 					manifest = manifestPath ? this.readManifest(manifestPath) : undefined;
-					logger.info(
-						`worker-complete coverId="${coverId}" backend="${detectedBackend}" pages="${totalPages || 0}" manifest="${manifestPath || ""}".`
-					);
+					if (isDirectorySource) {
+						logger.info(
+							`worker-complete coverId="${coverId}" sourceType="directory" pages="${totalPages || 0}" manifest="${manifestPath || ""}".`
+						);
+					} else {
+						logger.info(
+							`worker-complete coverId="${coverId}" backend="${detectedBackend}" pages="${totalPages || 0}" manifest="${manifestPath || ""}".`
+						);
+					}
 					return;
 				}
 

@@ -111,7 +111,7 @@ export class ComicChunkCacheService {
 		}
 
 		logger.info(
-			`cache-build:start ${itemProgress}coverId="${source.coverId}" type="${source.sourceType}" format="${source.archiveFormat || ""}" path="${source.sourcePath}".`
+			`cache-build:start ${itemProgress}coverId="${source.coverId}" sourceType="${source.sourceType}" format="${source.archiveFormat || ""}" path="${source.sourcePath}".`
 		);
 
 		const stagingDir = await createCacheStagingDir(source.coverId);
@@ -221,7 +221,7 @@ export class ComicChunkCacheService {
 		}
 
 		if (source.sourceType === "directory") {
-			logger.info(`cache-build:source-read ${itemProgress}coverId="${source.coverId}" type="${source.sourceType}" path="${source.sourcePath}".`);
+			logger.info(`cache-build:source-read ${itemProgress}coverId="${source.coverId}" sourceType="directory" path="${source.sourcePath}".`);
 			return {
 				imageFiles: await collectSortedDirectoryImages(source.sourcePath)
 			};
@@ -232,9 +232,15 @@ export class ComicChunkCacheService {
 
 	private async collectWorkerSourceImages(source: EligibleComicSource, itemProgress: string): Promise<CollectedSourceImages> {
 		const extraction = await NativeComicCacheWorkerService.getInstance().extractSourceToOrderedRaw(source);
-		logger.info(
-			`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" type="${source.sourceType}" backend="${extraction.detectedBackend || source.archiveFormat || ""}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
-		);
+		if (source.sourceType === "directory") {
+			logger.info(
+				`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" sourceType="directory" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
+			);
+		} else {
+			logger.info(
+				`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" sourceType="${source.sourceType}" backend="${extraction.detectedBackend || source.archiveFormat || ""}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
+			);
+		}
 
 		const imageFiles = await collectSortedDirectoryImages(extraction.rawDir);
 		this.validateWorkerExtraction(source, extraction, imageFiles);
