@@ -12,18 +12,22 @@ import {
 	cleanTitle,
 	generateHash,
 	getHashes,
-	getSpecialDirectorySize,
 	humanFileSize,
 	removeTrailingSeparator
 } from "(src)/utils/fileUtils";
 import { ScanResult } from "(src)/models/interfaces/ScanResult";
 import { Directory } from "(src)/models/interfaces/Directory";
 import { File, FileKind } from "(src)/models/interfaces/File";
+import { EligibleComicSource } from "(src)/models/interfaces/EligibleComicSource";
 import { ScanRootRepository } from "(src)/repositories/ScanRootRepository";
 import { FileRepository } from "(src)/repositories/FileRepository";
 import { CalibreService } from "(src)/services/CalibreService";
+import { ComicChunkCacheService } from "(src)/services/ComicChunkCacheService";
 import { OpenLibraryService } from "(src)/services/OpenLibraryService";
+import { SpecialDirectoryArtifactService } from "(src)/services/SpecialDirectoryArtifactService";
 import { config } from "(src)/config/configuration";
+import { cleanupCacheBuildRoot } from "(src)/utils/comicCacheUtils";
+import { toEligibleComicSource } from "(src)/utils/archiveDetectionUtils";
 
 const logger = new Logger("Scanner Service");
 
@@ -63,6 +67,7 @@ export class ScannerService {
 
 	public async scanCompareUpdate(scanRootPath: string) {
 		logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
+		const scanStartedAt = Date.now();
 
 		try {
 			const scanRoot = await ScanRootRepository.getInstance().getScanRootByPath(scanRootPath);
@@ -70,6 +75,13 @@ export class ScannerService {
 			if (!scanRoot) {
 				logger.error("No scan roots found.");
 				return;
+			}
+
+			try {
+				const removedStagingEntries = await cleanupCacheBuildRoot();
+				logger.info(`Staging cleanup removed "${removedStagingEntries}" residual entries.`);
+			} catch (cleanupError) {
+				logger.error("Staging cleanup failed:", cleanupError);
 			}
 
 			// - escanear el directorio observado.
@@ -81,20 +93,20 @@ export class ScannerService {
 			// - eliminar los archivos en la db que NO tengan un parentHash dentro de los hashes obtenidos.
 			const removedFilesCount = await FileRepository.getInstance().removeFileByParentHash(hash);
 			logger.info(`Removed files by parent hash: ${removedFilesCount}.`);
-
-			// - obtener los archivos de la db.
-			const hashes = await FileRepository.getInstance().getFileHashes(scanRoot.id);
+			let removedByFileHashCount = 0;
 
 			const scanHashSet = new Set(scanRootResult.scan.files.map((f: File) => f.fileHash));
-			const dbHashSet = new Set(hashes.map((h: { hash: string }) => h.hash));
-
-			const fileToRemove = hashes.filter((h: { hash: string }) => !scanHashSet.has(h.hash));
+			let currentDbFiles = await FileRepository.getInstance().getFilesForCacheBuild(scanRoot.id);
+			let dbHashSet = new Set(currentDbFiles.map((file: File) => file.fileHash));
+			const fileToRemove = currentDbFiles.filter((file: File) => !scanHashSet.has(file.fileHash));
 
 			// - eliminar los archivos en la db que NO estén en el scan.
 			if (fileToRemove.length) {
-				const removedCount = await FileRepository.getInstance()
-					.removeFileByFileHash(fileToRemove.map((f: { hash: string }) => f.hash));
-				logger.info(`Removed files by file hash: ${removedCount}.`);
+				removedByFileHashCount = await FileRepository.getInstance()
+					.removeFileByFileHash(fileToRemove.map((file: File) => file.fileHash));
+				logger.info(`Removed files by file hash: ${removedByFileHashCount}.`);
+				currentDbFiles = await FileRepository.getInstance().getFilesForCacheBuild(scanRoot.id);
+				dbHashSet = new Set(currentDbFiles.map((file: File) => file.fileHash));
 			}
 
 			// - los archivos del scan que no estén en la db, se insertan.
@@ -103,50 +115,114 @@ export class ScannerService {
 			logger.info(`New files: ${newFiles.length}.`);
 			logger.info(JSON.stringify(newFiles.map((f: File) => f.name)));
 
-			// - generar la caché (ZIP) de los archivos especiales existentes solo si no existe.
-			const existingSpecials = scanRootResult.scan.files.filter(
-				(f: File) => dbHashSet.has(f.fileHash) && f.fileKind !== FileKind.FILE && f.fileKind !== FileKind.NONE
-			);
-			const specialArchives = await FileRepository.getInstance().getSpecialArchives(scanRoot.id);
-			const specialDbMap = new Map(specialArchives.map((sa: File) => [sa.fileHash, sa]));
+			const concurrency = config.production.scan.concurrency;
+			const insertedNewFiles: File[] = [];
+			let firstInsertElapsedMs: number | undefined = undefined;
+			let metadataCompleted = 0;
+			let insertCompleted = 0;
+			let insertFailed = 0;
 
-			logger.info(`Existing special archives: ${existingSpecials.length}.`);
-			for (const sf of existingSpecials) {
-				const dbRecord = specialDbMap.get(sf.fileHash);
-				if (!dbRecord) continue;
-				const cachePath = path.join(__dirname, "..", "public", "cache", dbRecord.coverId);
-				const exist = await fs.pathExists(cachePath);
-				if (!exist) {
-					logger.info(`Special archive cache not found, building: "${sf.name}".`);
-					const size = await getSpecialDirectorySize(path.join(sf.parentPath, sf.name), dbRecord.coverId);
-					await FileRepository.getInstance().updateSpecialArchiveSize(dbRecord.id, size);
-					logger.info(`Special archive size updated: "${sf.name}" - "${size}".`);
+			// Phase 1: local metadata + web metadata + immediate DB insert per file
+			logger.info(`Phase 1 — metadata and insert for ${newFiles.length} files (concurrency: ${concurrency})`);
+			await this.processConcurrently(newFiles, async (file, idx) => {
+				const fullPath = path.join(file.parentPath, file.name);
+				logger.info(`Metadata start queued="${idx + 1}/${newFiles.length}" path="${fullPath}".`);
+				await this.fillLocalDetails(file);
+				await this.fillWebDetails(file);
+				metadataCompleted++;
+				logger.info(`Metadata progress completed="${metadataCompleted}/${newFiles.length}" path="${fullPath}".`);
+				const insertedId = await FileRepository.getInstance().insertFile(file, scanRoot.id);
+
+				if (insertedId) {
+					file.id = insertedId;
+					insertedNewFiles.push(file);
+					if (firstInsertElapsedMs === undefined) {
+						firstInsertElapsedMs = Date.now() - scanStartedAt;
+					}
+					insertCompleted++;
+					logger.info(
+						`Insert progress completed="${insertCompleted}/${newFiles.length}" failed="${insertFailed}" path="${fullPath}" id="${insertedId}".`
+					);
+				} else {
+					insertFailed++;
+					logger.error(`Insert failed for "${fullPath}".`);
+					logger.info(
+						`Insert progress completed="${insertCompleted}/${newFiles.length}" failed="${insertFailed}" path="${fullPath}".`
+					);
 				}
+			}, concurrency);
+
+			const currentDbFilesMap = new Map(currentDbFiles.map((file: File) => [file.fileHash, file]));
+			const existingEligibleSources = scanRootResult.scan.files
+				.filter((file: File) => dbHashSet.has(file.fileHash))
+				.map((file: File) => currentDbFilesMap.get(file.fileHash))
+				.filter((file: File | undefined): file is File => file !== undefined)
+				.map((file: File) => toEligibleComicSource(file))
+				.filter((source: EligibleComicSource | undefined): source is EligibleComicSource => source !== undefined)
+			;
+
+			const newEligibleSources = insertedNewFiles
+				.map((file: File) => toEligibleComicSource(file))
+				.filter((source: EligibleComicSource | undefined): source is EligibleComicSource => source !== undefined)
+			;
+
+			const existingZipOnlySpecials = currentDbFiles
+				.filter((file: File) => SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file))
+			;
+			const newZipOnlySpecials = insertedNewFiles
+				.filter((file: File) => SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file))
+			;
+			const zipOnlySpecials = [...existingZipOnlySpecials, ...newZipOnlySpecials];
+			let specialArtifactReadyCount = 0;
+			let specialArtifactSkippedCount = 0;
+			let specialArtifactErrorCount = 0;
+
+			logger.info(
+				`Phase 2 — special directory artifacts total="${zipOnlySpecials.length}" existing="${existingZipOnlySpecials.length}" new="${newZipOnlySpecials.length}".`
+			);
+			if (zipOnlySpecials.length) {
+				const specialArtifactResults = await SpecialDirectoryArtifactService.getInstance().ensureArtifactsForFiles(
+					zipOnlySpecials,
+					{concurrency}
+				);
+				specialArtifactReadyCount = specialArtifactResults.filter((result) => result.status === "ready").length;
+				specialArtifactSkippedCount = specialArtifactResults.filter((result) => result.status === "skipped").length;
+				specialArtifactErrorCount = specialArtifactResults.filter((result) => result.status === "error").length;
+				logger.info(
+					`Phase 2 — special directory artifacts complete ready="${specialArtifactReadyCount}" skipped="${specialArtifactSkippedCount}" error="${specialArtifactErrorCount}".`
+				);
 			}
 
-			const concurrency = config.production.scan.concurrency;
+			const eligibleSources = [...existingEligibleSources, ...newEligibleSources];
+			logger.info(
+				`Phase 3 — cache build candidates total="${eligibleSources.length}" existing="${existingEligibleSources.length}" new="${newEligibleSources.length}".`
+			);
+			let readyCount = 0;
+			let skippedCount = 0;
+			let errorCount = 0;
 
-			// Phase 1: local metadata via calibre + special dir size (CPU/disk bound)
-			logger.info(`Phase 1 — local metadata for ${newFiles.length} files (concurrency: ${concurrency})`);
-			await this.processConcurrently(newFiles, async (file, idx) => {
-				logger.info(`Local metadata ${idx + 1}/${newFiles.length}: "${path.join(file.parentPath, file.name)}"`);
-				await this.fillLocalDetails(file);
-				if (file.fileKind !== FileKind.FILE && file.fileKind !== FileKind.NONE) {
-					logger.info(`Getting special directory size: "${path.join(file.parentPath, file.name)}"`);
-					file.size = await getSpecialDirectorySize(path.join(file.parentPath, file.name), file.coverId);
-					logger.info(`Special directory size: "${file.size}"`);
-				}
-			}, concurrency);
+			if (eligibleSources.length) {
+				const cacheResults = await ComicChunkCacheService.getInstance().ensureCacheForSources(eligibleSources, {
+					concurrency: config.production.scan.cacheConcurrency
+				});
+				readyCount = cacheResults.filter((result) => result.status === "ready").length;
+				skippedCount = cacheResults.filter((result) => result.status === "skipped").length;
+				errorCount = cacheResults.filter((result) => result.status === "error").length;
 
-			// Phase 2: web metadata via OpenLibrary + DB insert (network bound)
-			logger.info(`Phase 2 — web metadata for ${newFiles.length} files (concurrency: ${concurrency})`);
-			await this.processConcurrently(newFiles, async (file, idx) => {
-				logger.info(`Web metadata ${idx + 1}/${newFiles.length}: "${file.name}"`);
-				await this.fillWebDetails(file);
-				await FileRepository.getInstance().insertFile(file, scanRoot.id);
-			}, concurrency);
+				logger.info(
+					`Phase 3 — cache build complete ready="${readyCount}" skipped="${skippedCount}" error="${errorCount}".`
+				);
+			}
 
 			await ScanRootRepository.getInstance().updateScanRoot(JSON.stringify(scanRootResult.scan.directories), scanRoot.id);
+			logger.info(
+				`scanCompareUpdate summary scanRoot="${scanRootPath}" newFiles="${newFiles.length}" inserted="${insertedNewFiles.length}" ` +
+				`specialZipReady="${specialArtifactReadyCount}" specialZipSkipped="${specialArtifactSkippedCount}" specialZipError="${specialArtifactErrorCount}" ` +
+				`eligible="${eligibleSources.length}" cacheReady="${readyCount}" cacheSkipped="${skippedCount}" cacheError="${errorCount}" ` +
+				`removedByParentHash="${removedFilesCount}" removedByFileHash="${removedByFileHashCount}" ` +
+				`metadataCompleted="${metadataCompleted}" insertFailed="${insertFailed}" ` +
+				`firstInsertMs="${firstInsertElapsedMs ?? -1}" totalMs="${Date.now() - scanStartedAt}".`
+			);
 		} catch (error) {
 			logger.error(`scanCompareUpdate "${scanRootPath}":`, error.message);
 		}
