@@ -46,24 +46,6 @@ AssignmentMap buildAssignmentMap(const std::vector<CanonicalArchiveEntry>& entri
     return assignments;
 }
 
-ArchiveProbeResult finalizeProbeResult(const ArchiveProbeResult& partial, int minImages) {
-    ArchiveProbeResult result = partial;
-    if (result.accepted) {
-        result.reason = "accepted";
-        return result;
-    }
-
-    result.reason = result.imageCount <= 0 ? "no_images" : "below_min_images";
-    if (result.entriesScanned < 1 && result.reason == "no_images") {
-        result.reason = "no_entries";
-    }
-    if (result.imageCount >= minImages) {
-        result.accepted = true;
-        result.reason = "accepted";
-    }
-    return result;
-}
-
 }  // namespace
 
 class RarBackend : public ArchiveBackend {
@@ -82,7 +64,9 @@ public:
                     }
                     entries.push_back({name, name, extension});
                 }
-                RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr);
+                if (RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr) != 0) {
+                    throw std::runtime_error("Failed to skip RAR entry while listing: " + name);
+                }
             }
         });
 
@@ -106,13 +90,17 @@ public:
                     std::string name = rarEntryNameUtf8(header);
                     const bool isDir = (header.Flags & RHDF_DIRECTORY) != 0;
                     if (isDir || !isImageArchiveEntry(name)) {
-                        RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr);
+                        if (RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr) != 0) {
+                            throw std::runtime_error("Failed to skip RAR entry: " + name);
+                        }
                         continue;
                     }
 
                     auto assignmentIt = assignments.find(name);
                     if (assignmentIt == assignments.end() || assignmentIt->second.empty()) {
-                        RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr);
+                        if (RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr) != 0) {
+                            throw std::runtime_error("Failed to skip unmatched RAR entry: " + name);
+                        }
                         continue;
                     }
 
@@ -149,39 +137,6 @@ public:
         cancelFlag = nullptr;
         currentEntryData.clear();
         return processedCount;
-    }
-
-    ArchiveProbeResult probeEntries(const std::string& archivePath, int maxEntries, int minImages) override {
-        ArchiveProbeResult result;
-
-        openArchive(archivePath, [&](HANDLE hArc) {
-            RARHeaderDataEx header{};
-            while (RARReadHeaderEx(hArc, &header) == 0) {
-                std::string name = rarEntryNameUtf8(header);
-                const bool isDir = (header.Flags & RHDF_DIRECTORY) != 0;
-                if (isDir || isJunkArchiveEntry(name)) {
-                    RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr);
-                    continue;
-                }
-
-                result.entriesScanned++;
-                if (isImageArchiveEntry(name)) {
-                    result.imageCount++;
-                    if (result.imageCount >= minImages) {
-                        result.accepted = true;
-                        RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr);
-                        break;
-                    }
-                }
-
-                RARProcessFile(hArc, RAR_SKIP, nullptr, nullptr);
-                if (result.entriesScanned >= maxEntries) {
-                    break;
-                }
-            }
-        });
-
-        return finalizeProbeResult(result, minImages);
     }
 
     void close() override {

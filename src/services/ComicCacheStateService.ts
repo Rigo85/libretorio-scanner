@@ -16,8 +16,7 @@ interface BaseStateInput {
 
 type BaseStateOutput = Omit<
 ComicCacheState,
-"status" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "lastError" |
-"ignoreReason" | "probeEntriesScanned" | "probeImageCount" | "probeMaxEntries" | "probeMinImages"
+"status" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "lastError"
 >;
 
 export class ComicCacheStateService {
@@ -67,12 +66,7 @@ export class ComicCacheStateService {
 			totalPages: 0,
 			zipReady: false,
 			chunksReady: false,
-			lastError: undefined,
-			ignoreReason: undefined,
-			probeEntriesScanned: undefined,
-			probeImageCount: undefined,
-			probeMaxEntries: undefined,
-			probeMinImages: undefined
+			lastError: undefined
 		};
 
 		await this.write(statePath, state);
@@ -103,12 +97,7 @@ export class ComicCacheStateService {
 			totalPages: payload.totalPages,
 			zipReady: payload.zipReady,
 			chunksReady: true,
-			lastError: undefined,
-			ignoreReason: undefined,
-			probeEntriesScanned: undefined,
-			probeImageCount: undefined,
-			probeMaxEntries: undefined,
-			probeMinImages: undefined
+			lastError: undefined
 		};
 
 		await this.write(statePath, state);
@@ -117,7 +106,7 @@ export class ComicCacheStateService {
 
 	public async markError(
 		statePath: string,
-		source: EligibleComicSource,
+		source: BaseStateInput,
 		errorMessage: string
 	): Promise<ComicCacheState> {
 		const previous = await this.read(statePath);
@@ -135,44 +124,7 @@ export class ComicCacheStateService {
 			totalPages: 0,
 			zipReady: false,
 			chunksReady: false,
-			lastError: errorMessage,
-			ignoreReason: undefined,
-			probeEntriesScanned: undefined,
-			probeImageCount: undefined,
-			probeMaxEntries: undefined,
-			probeMinImages: undefined
-		};
-
-		await this.write(statePath, state);
-		return state;
-	}
-
-	public async markIgnored(
-		statePath: string,
-		payload: BaseStateInput & {
-			reason: string;
-			probeEntriesScanned?: number;
-			probeImageCount?: number;
-			probeMaxEntries?: number;
-			probeMinImages?: number;
-		}
-	): Promise<ComicCacheState> {
-		const previous = await this.read(statePath);
-		const nextState = this.buildBaseState(payload, previous);
-
-		const state: ComicCacheState = {
-			...nextState,
-			status: "ignored",
-			chunkCount: 0,
-			totalPages: 0,
-			zipReady: false,
-			chunksReady: false,
-			lastError: undefined,
-			ignoreReason: payload.reason,
-			probeEntriesScanned: payload.probeEntriesScanned,
-			probeImageCount: payload.probeImageCount,
-			probeMaxEntries: payload.probeMaxEntries,
-			probeMinImages: payload.probeMinImages
+			lastError: errorMessage
 		};
 
 		await this.write(statePath, state);

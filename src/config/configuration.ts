@@ -50,11 +50,6 @@ export const config = {
 			concurrency: getMinOneInt(process.env.SCAN_CONCURRENCY, 4),
 			cacheConcurrency: getMinOneInt(process.env.SCAN_CACHE_CONCURRENCY, 1),
 			cacheChunkBytes: parseInt(process.env.SCAN_CACHE_CHUNK_BYTES || `${10 * 1024 * 1024}`),
-			cacheProbe: {
-				enabled: getBoolean(process.env.SCAN_CACHE_PROBE_ENABLED, true),
-				maxEntries: getMinOneInt(process.env.SCAN_CACHE_PROBE_MAX_ENTRIES, 40),
-				minImages: getMinOneInt(process.env.SCAN_CACHE_PROBE_MIN_IMAGES, 8)
-			},
 			cacheResize: {
 				enabled: getBoolean(process.env.SCAN_CACHE_RESIZE_ENABLED, true),
 				readerMaxDimension: getClampedInt(process.env.SCAN_CACHE_READER_MAX_DIMENSION, 2400, 512, 10000),

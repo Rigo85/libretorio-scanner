@@ -34,7 +34,7 @@ AssignmentMap buildAssignmentMap(const std::vector<CanonicalArchiveEntry>& entri
     return assignments;
 }
 
-std::vector<uint8_t> readArchiveEntryData(archive* arc) {
+std::vector<uint8_t> readArchiveEntryData(archive* arc, const std::string& entryName) {
     std::vector<uint8_t> output;
     char chunk[64 * 1024];
 
@@ -44,31 +44,17 @@ std::vector<uint8_t> readArchiveEntryData(archive* arc) {
             break;
         }
         if (bytesRead < 0) {
-            throw std::runtime_error("Failed to read archive entry data");
+            const char* archiveMessage = archive_error_string(arc);
+            throw std::runtime_error(
+                "Failed to read archive entry data: " + entryName +
+                (archiveMessage ? " (" + std::string(archiveMessage) + ")" : "")
+            );
         }
 
         output.insert(output.end(), chunk, chunk + bytesRead);
     }
 
     return output;
-}
-
-ArchiveProbeResult finalizeProbeResult(const ArchiveProbeResult& partial, int minImages) {
-    ArchiveProbeResult result = partial;
-    if (result.accepted) {
-        result.reason = "accepted";
-        return result;
-    }
-
-    result.reason = result.imageCount <= 0 ? "no_images" : "below_min_images";
-    if (result.entriesScanned < 1 && result.reason == "no_images") {
-        result.reason = "no_entries";
-    }
-    if (result.imageCount >= minImages) {
-        result.accepted = true;
-        result.reason = "accepted";
-    }
-    return result;
 }
 
 }  // namespace
@@ -163,7 +149,7 @@ int LibarchiveBackend::processEntries(const std::string& archivePath,
             SortedAssignment assignment = assignmentIt->second.front();
             assignmentIt->second.pop_front();
 
-            std::vector<uint8_t> data = readArchiveEntryData(arc);
+            std::vector<uint8_t> data = readArchiveEntryData(arc, assignment.entry.archivePath);
             processor(assignment.sortedIndex, assignment.entry, std::move(data));
 
             if (progressCb) {
@@ -180,45 +166,6 @@ int LibarchiveBackend::processEntries(const std::string& archivePath,
     archive_read_close(arc);
     archive_read_free(arc);
     return processedCount;
-}
-
-ArchiveProbeResult LibarchiveBackend::probeEntries(const std::string& archivePath, int maxEntries, int minImages) {
-    ArchiveProbeResult result;
-    archive* arc = openArchive(archivePath);
-    archive_entry* entry = nullptr;
-
-    while (true) {
-        const int headerStatus = archive_read_next_header(arc, &entry);
-        if (headerStatus == ARCHIVE_EOF) break;
-        if (headerStatus == ARCHIVE_RETRY) continue;
-        if (headerStatus != ARCHIVE_OK && headerStatus != ARCHIVE_WARN) break;
-
-        const std::string name = archiveEntryPathUtf8(entry);
-        const bool isDir = archive_entry_filetype(entry) == AE_IFDIR;
-        if (isDir || isJunkArchiveEntry(name)) {
-            archive_read_data_skip(arc);
-            continue;
-        }
-
-        result.entriesScanned++;
-        if (isImageArchiveEntry(name)) {
-            result.imageCount++;
-            if (result.imageCount >= minImages) {
-                result.accepted = true;
-                archive_read_data_skip(arc);
-                break;
-            }
-        }
-
-        archive_read_data_skip(arc);
-        if (result.entriesScanned >= maxEntries) {
-            break;
-        }
-    }
-
-    archive_read_close(arc);
-    archive_read_free(arc);
-    return finalizeProbeResult(result, minImages);
 }
 
 void LibarchiveBackend::close() {

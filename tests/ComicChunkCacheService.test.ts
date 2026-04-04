@@ -169,6 +169,8 @@ describe("ComicChunkCacheService", () => {
 			chunkCount: seeded.chunkCount,
 			totalPages: seeded.totalPages
 		});
+		const preservedState = await fs.readJson(getStatePath(coverId)) as { status: string };
+		expect(preservedState.status).toBe("ready");
 	});
 
 	it("returns error when no valid images exist for chunk generation", async () => {
@@ -201,5 +203,15 @@ describe("ComicChunkCacheService", () => {
 			chunkCount: 0,
 			totalPages: 0
 		});
+		const errorState = await fs.readJson(getStatePath(coverId)) as {
+			status: string;
+			sourcePath: string;
+			sourceType: string;
+			lastError?: string;
+		};
+		expect(errorState.status).toBe("error");
+		expect(errorState.sourceType).toBe("directory");
+		expect(errorState.sourcePath).toBe(sourceDir);
+		expect(errorState.lastError).toContain("Worker manifest contains no pages");
 	});
 });

@@ -197,6 +197,20 @@ export class ComicChunkCacheService {
 			};
 		} catch (error) {
 			await cleanupStagingDir(stagingDir);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+
+			const finalValidation = await validateChunkCache(source.coverId, source.requiresZipArtifact);
+			if (!finalValidation.valid) {
+				try {
+					await ComicCacheStateService.getInstance().markError(
+						getStatePath(source.coverId),
+						source,
+						errorMessage
+					);
+				} catch (stateError) {
+					logger.error(`cache-build:error-state ${itemProgress}coverId="${source.coverId}" path="${source.sourcePath}":`, stateError);
+				}
+			}
 
 			logger.error(`cache-build:error ${itemProgress}coverId="${source.coverId}" path="${source.sourcePath}":`, error);
 
@@ -205,7 +219,7 @@ export class ComicChunkCacheService {
 				status: "error",
 				totalPages: 0,
 				chunkCount: 0,
-				error: error instanceof Error ? error.message : String(error),
+				error: errorMessage,
 				elapsedMs: Date.now() - start
 			};
 		} finally {

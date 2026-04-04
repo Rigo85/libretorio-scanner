@@ -2,7 +2,7 @@ import { ComicArchiveFormat, ComicSourceType } from "(src)/models/interfaces/Eli
 
 export interface ComicCacheState {
 	version: 1;
-	status: "building" | "ready" | "error" | "ignored";
+	status: "building" | "ready" | "error";
 	sourcePath: string;
 	sourceType: ComicSourceType;
 	archiveFormat?: ComicArchiveFormat;
@@ -14,9 +14,4 @@ export interface ComicCacheState {
 	zipReady: boolean;
 	chunksReady: boolean;
 	lastError?: string;
-	ignoreReason?: string;
-	probeEntriesScanned?: number;
-	probeImageCount?: number;
-	probeMaxEntries?: number;
-	probeMinImages?: number;
 }

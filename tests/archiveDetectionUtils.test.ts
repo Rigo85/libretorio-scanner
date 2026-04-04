@@ -3,10 +3,10 @@ import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 
-import { FileKind } from "(src)/models/interfaces/File";
 import { config } from "(src)/config/configuration";
+import { FileKind } from "(src)/models/interfaces/File";
 import { ComicCacheStateService } from "(src)/services/ComicCacheStateService";
-import { NativeComicCacheWorkerService } from "(src)/services/NativeComicCacheWorkerService";
+import { getStatePath } from "(src)/utils/comicCacheUtils";
 import {
 	detectArchiveFormatByPathOrMagic,
 	resolveEligibleComicSource,
@@ -15,13 +15,17 @@ import {
 
 describe("archiveDetectionUtils", () => {
 	let tempDir: string;
+	let originalCachePath: string;
 
 	beforeEach(async () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "libretorio-archive-detect-"));
+		originalCachePath = config.production.paths.cache;
+		config.production.paths.cache = path.join(tempDir, "cache");
 	});
 
 	afterEach(async () => {
 		jest.restoreAllMocks();
+		config.production.paths.cache = originalCachePath;
 		await fs.rm(tempDir, {recursive: true, force: true});
 	});
 
@@ -37,13 +41,13 @@ describe("archiveDetectionUtils", () => {
 		expect(detectArchiveFormatByPathOrMagic(filePath)).toBe("7z");
 	});
 
-	it("builds an eligible source for archive files without changing fileKind", async () => {
-		const filePath = path.join(tempDir, "volume.zip");
+	it("builds an eligible source only for declared comic extensions", async () => {
+		const filePath = path.join(tempDir, "volume.cbz");
 		await fs.writeFile(filePath, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]));
 
 		const eligible = toEligibleComicSource({
 			id: 99,
-			name: "volume.zip",
+			name: "volume.cbz",
 			parentPath: tempDir,
 			parentHash: "parent",
 			fileHash: "hash",
@@ -61,130 +65,101 @@ describe("archiveDetectionUtils", () => {
 		}));
 	});
 
-	it("accepts direct cbz files without requiring the generic probe", async () => {
-		const filePath = path.join(tempDir, "issue.cbz");
+	it("rejects generic archive extensions even when their magic bytes are valid", async () => {
+		const filePath = path.join(tempDir, "volume.zip");
 		await fs.writeFile(filePath, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]));
-		const probeSpy = jest.spyOn(NativeComicCacheWorkerService.getInstance(), "probeArchiveForComic");
 
 		const resolution = await resolveEligibleComicSource({
 			id: 101,
+			name: "volume.zip",
+			parentPath: tempDir,
+			parentHash: "parent",
+			fileHash: "hash-zip",
+			size: "1 KB",
+			coverId: "cover-zip",
+			fileKind: FileKind.FILE
+		});
+
+		expect(resolution.result).toBe("skipped");
+		expect(resolution.reason).toBe("unsupported-format");
+		expect(resolution.source).toBeUndefined();
+	});
+
+	it("rejects declared comic extensions when magic bytes are invalid", async () => {
+		const filePath = path.join(tempDir, "issue.cbz");
+		await fs.writeFile(filePath, Buffer.from("not-an-archive"));
+
+		const resolution = await resolveEligibleComicSource({
+			id: 102,
 			name: "issue.cbz",
 			parentPath: tempDir,
 			parentHash: "parent",
-			fileHash: "hash-cbz",
+			fileHash: "hash-invalid-cbz",
 			size: "1 KB",
-			coverId: "cover-cbz",
+			coverId: "cover-invalid-cbz",
+			fileKind: FileKind.FILE
+		});
+
+		expect(resolution.result).toBe("skipped");
+		expect(resolution.reason).toBe("invalid-comic-magic");
+		expect(resolution.source).toBeUndefined();
+
+		const state = await fs.readJson(getStatePath("cover-invalid-cbz")) as {
+			status: string;
+			sourcePath: string;
+			sourceType: string;
+			lastError?: string;
+		};
+		expect(state.status).toBe("error");
+		expect(state.sourceType).toBe("archive-file");
+		expect(state.sourcePath).toBe(filePath);
+		expect(state.lastError).toContain("Declared comic extension does not match");
+	});
+
+	it("uses the backend detected by magic bytes for declared comic extensions", async () => {
+		const filePath = path.join(tempDir, "issue.cbz");
+		await fs.writeFile(filePath, Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]));
+
+		const resolution = await resolveEligibleComicSource({
+			id: 103,
+			name: "issue.cbz",
+			parentPath: tempDir,
+			parentHash: "parent",
+			fileHash: "hash-mismatch",
+			size: "1 KB",
+			coverId: "cover-mismatch",
 			fileKind: FileKind.FILE
 		});
 
 		expect(resolution.result).toBe("eligible");
 		expect(resolution.reason).toBe("direct-comic-extension");
 		expect(resolution.source).toEqual(expect.objectContaining({
-			archiveFormat: "zip",
-			sourceType: "archive-file"
-		}));
-		expect(probeSpy).not.toHaveBeenCalled();
-	});
-
-	it("rejects multipart rar tails before probing", async () => {
-		const filePath = path.join(tempDir, "Enciclopedia.part03.rar");
-		await fs.writeFile(filePath, Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]));
-		const probeSpy = jest.spyOn(NativeComicCacheWorkerService.getInstance(), "probeArchiveForComic");
-
-		const resolution = await resolveEligibleComicSource({
-			id: 102,
-			name: "Enciclopedia.part03.rar",
-			parentPath: tempDir,
-			parentHash: "parent",
-			fileHash: "hash-rar-tail",
-			size: "1 KB",
-			coverId: "cover-rar-tail",
-			fileKind: FileKind.FILE
-		});
-
-		expect(resolution.result).toBe("skipped");
-		expect(resolution.reason).toBe("ignored-multipart-tail");
-		expect(probeSpy).not.toHaveBeenCalled();
-	});
-
-	it("probes generic archives and persists ignored negatives", async () => {
-		const filePath = path.join(tempDir, "bundle.zip");
-		await fs.writeFile(filePath, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]));
-		const readSpy = jest.spyOn(ComicCacheStateService.getInstance(), "read").mockResolvedValueOnce(undefined);
-		const markIgnoredSpy = jest.spyOn(ComicCacheStateService.getInstance(), "markIgnored").mockResolvedValue({
-			version: 1,
-			status: "ignored",
-			sourcePath: filePath,
 			sourceType: "archive-file",
-			archiveFormat: "zip",
-			fileHash: "hash-bundle",
-			createdAt: new Date().toISOString(),
-			updatedAt: new Date().toISOString(),
-			chunkCount: 0,
-			totalPages: 0,
-			zipReady: false,
-			chunksReady: false,
-			ignoreReason: "below_min_images",
-			probeEntriesScanned: 40,
-			probeImageCount: 4,
-			probeMaxEntries: config.production.scan.cacheProbe.maxEntries,
-			probeMinImages: config.production.scan.cacheProbe.minImages
-		});
-		const probeSpy = jest.spyOn(NativeComicCacheWorkerService.getInstance(), "probeArchiveForComic").mockResolvedValue({
-			accepted: false,
-			reason: "below_min_images",
-			entriesScanned: 40,
-			imageCount: 4,
-			detectedBackend: "zip"
-		});
-
-		const resolution = await resolveEligibleComicSource({
-			id: 103,
-			name: "bundle.zip",
-			parentPath: tempDir,
-			parentHash: "parent",
-			fileHash: "hash-bundle",
-			size: "1 KB",
-			coverId: "cover-bundle",
-			fileKind: FileKind.FILE
-		});
-
-		expect(readSpy).toHaveBeenCalledTimes(1);
-		expect(probeSpy).toHaveBeenCalledTimes(1);
-		expect(markIgnoredSpy).toHaveBeenCalledTimes(1);
-		expect(resolution.result).toBe("skipped");
-		expect(resolution.reason).toBe("ignored-below-min-images");
-		expect(resolution.probeEntriesScanned).toBe(40);
-		expect(resolution.probeImageCount).toBe(4);
+			archiveFormat: "rar"
+		}));
 	});
 
-	it("reuses persisted ignored state for generic archives without probing again", async () => {
-		const filePath = path.join(tempDir, "bundle.rar");
+	it("reuses ready state for declared comic sources", async () => {
+		const filePath = path.join(tempDir, "bundle.cbr");
 		await fs.writeFile(filePath, Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]));
 		jest.spyOn(ComicCacheStateService.getInstance(), "read").mockResolvedValue({
 			version: 1,
-			status: "ignored",
+			status: "ready",
 			sourcePath: filePath,
 			sourceType: "archive-file",
 			archiveFormat: "rar",
 			fileHash: "hash-bundle-rar",
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString(),
-			chunkCount: 0,
-			totalPages: 0,
+			chunkCount: 3,
+			totalPages: 40,
 			zipReady: false,
-			chunksReady: false,
-			ignoreReason: "no_images",
-			probeEntriesScanned: 40,
-			probeImageCount: 0,
-			probeMaxEntries: config.production.scan.cacheProbe.maxEntries,
-			probeMinImages: config.production.scan.cacheProbe.minImages
+			chunksReady: true
 		});
-		const probeSpy = jest.spyOn(NativeComicCacheWorkerService.getInstance(), "probeArchiveForComic");
 
 		const resolution = await resolveEligibleComicSource({
 			id: 104,
-			name: "bundle.rar",
+			name: "bundle.cbr",
 			parentPath: tempDir,
 			parentHash: "parent",
 			fileHash: "hash-bundle-rar",
@@ -193,8 +168,10 @@ describe("archiveDetectionUtils", () => {
 			fileKind: FileKind.FILE
 		});
 
-		expect(resolution.result).toBe("skipped");
-		expect(resolution.reason).toBe("ignored-no-images");
-		expect(probeSpy).not.toHaveBeenCalled();
+		expect(resolution.result).toBe("eligible");
+		expect(resolution.reason).toBe("ready-state");
+		expect(resolution.source).toEqual(expect.objectContaining({
+			archiveFormat: "rar"
+		}));
 	});
 });

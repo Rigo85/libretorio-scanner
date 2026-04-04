@@ -42,9 +42,6 @@ struct CliArgs {
     std::string inputDir;
     std::string output;
     std::string backend = "auto";
-    bool probe = false;
-    int probeMaxEntries = 40;
-    int probeMinImages = 8;
     std::string readerFormat = "jpeg";
     int readerMaxDimension = 2400;
     int readerQuality = 82;
@@ -66,14 +63,6 @@ struct WorkerResult {
     int pageCount = 0;
     BackendKind backend = BackendKind::Unknown;
     std::string manifestPath;
-};
-
-struct WorkerProbeResult {
-    bool accepted = false;
-    int entriesScanned = 0;
-    int imageCount = 0;
-    BackendKind backend = BackendKind::Unknown;
-    std::string reason;
 };
 
 struct DirectoryImageEntry {
@@ -162,18 +151,6 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
             args.backend = argv[++index];
             continue;
         }
-        if (arg == "--probe") {
-            args.probe = true;
-            continue;
-        }
-        if (arg == "--probe-max-entries" && index + 1 < argc) {
-            args.probeMaxEntries = std::atoi(argv[++index]);
-            continue;
-        }
-        if (arg == "--probe-min-images" && index + 1 < argc) {
-            args.probeMinImages = std::atoi(argv[++index]);
-            continue;
-        }
         if (arg == "--reader-format" && index + 1 < argc) {
             args.readerFormat = argv[++index];
             continue;
@@ -201,14 +178,6 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
 
     const bool hasArchiveInput = !args.input.empty();
     const bool hasDirectoryInput = !args.inputDir.empty();
-
-    if (args.probe) {
-        if (!hasArchiveInput || hasDirectoryInput) {
-            printUsage(argv[0]);
-            return false;
-        }
-        return true;
-    }
 
     if (args.output.empty() || hasArchiveInput == hasDirectoryInput) {
         printUsage(argv[0]);
@@ -470,12 +439,6 @@ std::string writeManifest(
 }
 
 void validateCliArgs(const CliArgs& args) {
-    if (args.probeMaxEntries < 1) {
-        throw std::runtime_error("probeMaxEntries must be >= 1");
-    }
-    if (args.probeMinImages < 1) {
-        throw std::runtime_error("probeMinImages must be >= 1");
-    }
     if (args.readerFormat != "jpeg" && args.readerFormat != "webp") {
         throw std::runtime_error("Unsupported reader format");
     }
@@ -584,37 +547,6 @@ WorkerResult processArchiveInput(const CliArgs& args, const ImageConfig& config)
     };
 }
 
-WorkerProbeResult probeArchiveInput(const CliArgs& args) {
-    const BackendKind backend = resolveBackend(args);
-    if (backend == BackendKind::Unknown) {
-        throw std::runtime_error("Unsupported archive format");
-    }
-
-    std::unique_ptr<ArchiveBackend> archiveBackend = createBackend(backend);
-    if (!archiveBackend) {
-        throw std::runtime_error("Could not initialize archive backend");
-    }
-
-    emitEvent("start",
-        "\"backend\":\"" + std::string(backendName(backend)) +
-        "\",\"input\":\"" + jsonEscape(args.input) + "\"");
-
-    const ArchiveProbeResult probeResult = archiveBackend->probeEntries(
-        args.input,
-        args.probeMaxEntries,
-        args.probeMinImages
-    );
-    archiveBackend->close();
-
-    return {
-        probeResult.accepted,
-        probeResult.entriesScanned,
-        probeResult.imageCount,
-        backend,
-        probeResult.reason
-    };
-}
-
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -629,17 +561,6 @@ int main(int argc, char* argv[]) {
         signal(SIGTERM, signalHandler);
         signal(SIGINT, signalHandler);
         cancelled = 0;
-
-        if (args.probe) {
-            const WorkerProbeResult result = probeArchiveInput(args);
-            emitEvent("probe-complete",
-                "\"backend\":\"" + std::string(backendName(result.backend)) +
-                "\",\"accepted\":" + std::string(result.accepted ? "true" : "false") +
-                ",\"entriesScanned\":" + std::to_string(result.entriesScanned) +
-                ",\"imageCount\":" + std::to_string(result.imageCount) +
-                ",\"reason\":\"" + jsonEscape(result.reason) + "\"");
-            return 0;
-        }
 
         if (VIPS_INIT(argv[0]) != 0) {
             throw std::runtime_error("vips_init_failed");

@@ -12,13 +12,6 @@ struct ArchiveCancelContext {
     volatile sig_atomic_t* flag = nullptr;
 };
 
-struct ArchiveProbeResult {
-    bool accepted = false;
-    int entriesScanned = 0;
-    int imageCount = 0;
-    std::string reason;
-};
-
 /**
  * Abstract interface for archive backends.
  *
@@ -45,10 +38,6 @@ public:
                                const EntryProcessor& processor,
                                ProgressCb progressCb = nullptr,
                                void* userData = nullptr) = 0;
-
-    virtual ArchiveProbeResult probeEntries(const std::string& archivePath,
-                                            int maxEntries,
-                                            int minImages) = 0;
 
     /// Close and free resources.
     virtual void close() = 0;
