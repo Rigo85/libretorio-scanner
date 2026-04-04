@@ -103,6 +103,27 @@ Regla:
 - si supera ese umbral, se redimensiona y reencodea
 - el chunking ocurre después, usando el `raw/` final
 
+## Reducción de falsos positivos
+
+No todo `zip/rar/7z/tar` debe terminar en cache comic. El scanner ahora separa los casos así:
+
+- `cbz`, `cbr`, `cb7` y `cbt` entran directo como candidatos comic
+- colas multipart como `part02.rar`, `part03.rar`, `r00`, `r01` se descartan directo
+- `zip`, `rar`, `7z` y `tar` genéricos pasan por un probe corto antes de entrar al pipeline de cache
+
+Defaults actuales:
+
+- `SCAN_CACHE_PROBE_ENABLED=true`
+- `SCAN_CACHE_PROBE_MAX_ENTRIES=40`
+- `SCAN_CACHE_PROBE_MIN_IMAGES=8`
+
+Regla:
+
+- si dentro de las primeras `40` entradas útiles aparecen al menos `8` imágenes válidas, el archivo entra
+- si se llega al límite o el archivo termina con menos de `8` imágenes válidas, el archivo se ignora para cache comic
+- cuando un archivo genérico se ignora, el scanner persiste ese resultado en `_scanner_state.json` con estado `ignored`
+- si el `fileHash` y los thresholds no cambian, en corridas futuras ese archivo se salta sin reprobarlo
+
 ## Robustez del cache
 
 El flujo de cache actual implementa:
@@ -113,6 +134,11 @@ El flujo de cache actual implementa:
 - promoción atómica a `cache/<coverId>/`
 - preservación del cache final previo si un rebuild falla
 - estado por item en `_scanner_state.json`
+
+El estado por item también se reutiliza para:
+
+- recordar resultados `ignored` de archivos comprimidos genéricos que no pasaron el probe
+- evitar reprobar archivos ya marcados como `ready` o `ignored` cuando el `fileHash` y la configuración relevante no cambian
 
 ## Shared storage
 
