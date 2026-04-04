@@ -1,12 +1,8 @@
 import crypto from "crypto";
 import path from "path";
 import fs from "fs-extra";
-import archiver from "archiver";
 
 import { Directory } from "(src)/models/interfaces/Directory";
-import { Logger } from "(src)/helpers/Logger";
-
-const logger = new Logger("File Utils");
 
 export function checkIfPathExistsAndIsFile(filePath: string): boolean {
 	if (fs.existsSync(filePath)) {
@@ -83,35 +79,4 @@ export function cleanTitle(title: string): string {
 		.replace(/[^a-zA-ZñÑáéíóúÁÉÍÓÚ0-9 ]/g, " ")
 		.replace(/\s+/g, " ")
 		.toLowerCase();
-}
-
-export async function getSpecialDirectorySize(directoryPath: string, id: string): Promise<string> {
-	try {
-		const cachePath = path.join(__dirname, "..", "public", "cache", id);
-		await fs.mkdir(cachePath, {recursive: true});
-
-		return new Promise((resolve, reject) => {
-			const outputFileName = path.join(cachePath, `${id}.zip`);
-			const output = fs.createWriteStream(outputFileName);
-			const archive = archiver("zip", {
-				zlib: {level: 9} // Nivel de compresión
-			});
-
-			output.on("close", () => {
-				resolve(humanFileSize(archive.pointer(), true)); // Devuelve el tamaño del archivo ZIP en bytes
-			});
-
-			archive.on("error", (err: Error) => {
-				reject(err); // Rechaza la promesa en caso de error
-			});
-
-			archive.pipe(output);
-			archive.directory(directoryPath, false);
-			archive.finalize();
-		});
-	} catch (error) {
-		logger.error("getSpecialDirectorySize - Error reading directory:", error);
-
-		return "0";
-	}
 }

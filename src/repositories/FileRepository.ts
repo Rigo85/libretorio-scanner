@@ -133,6 +133,68 @@ export class FileRepository {
 		}
 	}
 
+	async getFilesByScanRoot(scanRootId: number): Promise<File[]> {
+		logger.info(`getFilesByScanRoot for scan root: "${scanRootId}".`);
+
+		try {
+			const query = `
+                SELECT *
+                FROM archive
+                WHERE scan_root_id = $1
+			`;
+			const values = [scanRootId];
+
+			const files = await PostgresAdapter.getInstance().query(query, values);
+			return files || [];
+		} catch (error) {
+			logger.error(`getFilesByScanRoot "${scanRootId}":`, error.message);
+			return [];
+		}
+	}
+
+	async getFilesForCacheBuild(scanRootId: number): Promise<File[]> {
+		logger.info(`getFilesForCacheBuild for scan root: "${scanRootId}".`);
+
+		try {
+			const query = `
+                SELECT id, name, "parentPath", "parentHash", "fileHash", "localDetails", "webDetails", size, "coverId", "fileKind"
+                FROM archive
+                WHERE scan_root_id = $1
+			`;
+			const values = [scanRootId];
+
+			const files = await PostgresAdapter.getInstance().query(query, values);
+			return files || [];
+		} catch (error) {
+			logger.error(`getFilesForCacheBuild "${scanRootId}":`, error.message);
+			return [];
+		}
+	}
+
+	async getFileByHashes(scanRootId: number, hashes: string[]): Promise<File[]> {
+		logger.info(`getFileByHashes for scan root="${scanRootId}" hashes="${hashes.length}".`);
+
+		if (!hashes.length) {
+			return [];
+		}
+
+		try {
+			const query = `
+                SELECT id, name, "parentPath", "parentHash", "fileHash", "localDetails", "webDetails", size, "coverId", "fileKind"
+                FROM archive
+                WHERE scan_root_id = $1
+                  AND "fileHash" = ANY ($2::text[])
+			`;
+			const values = [scanRootId, hashes];
+
+			const files = await PostgresAdapter.getInstance().query(query, values);
+			return files || [];
+		} catch (error) {
+			logger.error(`getFileByHashes "${scanRootId}":`, error.message);
+			return [];
+		}
+	}
+
 	async updateSpecialArchiveSize(id: number, size: string): Promise<number> {
 		logger.info(`updateSpecialArchiveSize: "${id}".`);
 
