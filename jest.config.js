@@ -4,4 +4,7 @@ module.exports = {
   silent: false,
   verbose: true,
   roots: ['<rootDir>/tests'], // Añadir la ubicación de tus archivos de prueba
+  moduleNameMapper: {
+    '^\\(src\\)/(.*)$': '<rootDir>/src/$1',
+  },
 };
