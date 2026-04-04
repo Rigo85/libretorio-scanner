@@ -23,6 +23,19 @@ export interface ChunkCacheValidationResult {
 	totalPages: number;
 }
 
+export interface ZipArtifactProgress {
+	entriesProcessed: number;
+	entriesTotal: number;
+	bytesProcessed: number;
+	bytesTotal: number;
+}
+
+export interface ChunkWriteProgress {
+	processedPages: number;
+	totalPages: number;
+	chunkCount: number;
+}
+
 const IMAGE_EXTENSIONS = new Set([
 	".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".bmp", ".tiff", ".tif"
 ]);
@@ -255,7 +268,10 @@ export async function collectSortedDirectoryImages(directoryPath: string): Promi
 export async function generateDirectoryZipArtifact(
 	directoryPath: string,
 	coverId: string,
-	cacheDir: string = getCacheDir(coverId)
+	cacheDir: string = getCacheDir(coverId),
+	options?: {
+		onProgress?: (progress: ZipArtifactProgress) => void | Promise<void>;
+	}
 ): Promise<{ zipPath: string; sizeBytes: number }> {
 	const zipPath = getZipPath(coverId, cacheDir);
 	await fs.ensureDir(path.dirname(zipPath));
@@ -270,6 +286,14 @@ export async function generateDirectoryZipArtifact(
 
 		output.on("error", reject);
 		archive.on("error", reject);
+		archive.on("progress", (progress) => {
+			void options?.onProgress?.({
+				entriesProcessed: progress.entries.processed || 0,
+				entriesTotal: progress.entries.total || 0,
+				bytesProcessed: progress.fs.processedBytes || 0,
+				bytesTotal: progress.fs.totalBytes || 0
+			});
+		});
 
 		archive.pipe(output);
 		archive.directory(directoryPath, false);
@@ -281,7 +305,11 @@ export async function writeChunksFromFiles(
 	files: ImageFileEntry[],
 	coverId: string,
 	sizeThreshold: number = config.production.scan.cacheChunkBytes,
-	cacheDir: string = getCacheDir(coverId)
+	cacheDir: string = getCacheDir(coverId),
+	options?: {
+		onProgress?: (progress: ChunkWriteProgress) => void | Promise<void>;
+		progressEveryPages?: number;
+	}
 ): Promise<{ chunkCount: number; totalPages: number }> {
 	await fs.ensureDir(cacheDir);
 
@@ -290,6 +318,34 @@ export async function writeChunksFromFiles(
 	let pageIndex = 1;
 	let currentSize = 0;
 	let currentBatch: string[] = [];
+	let processedPages = 0;
+	let lastReportedPages = 0;
+	let lastReportedChunkCount = -1;
+	const progressEveryPages = Math.max(1, options?.progressEveryPages ?? 25);
+
+	const reportProgress = async (force: boolean = false): Promise<void> => {
+		if (!options?.onProgress) {
+			return;
+		}
+
+		const shouldReport = force
+			|| processedPages === 1
+			|| processedPages === totalPages
+			|| processedPages >= lastReportedPages + progressEveryPages
+			|| chunkIndex !== lastReportedChunkCount;
+
+		if (!shouldReport) {
+			return;
+		}
+
+		lastReportedPages = processedPages;
+		lastReportedChunkCount = chunkIndex;
+		await options.onProgress({
+			processedPages,
+			totalPages,
+			chunkCount: chunkIndex
+		});
+	};
 
 	const flushBatch = async (): Promise<void> => {
 		if (!currentBatch.length) {
@@ -309,6 +365,7 @@ export async function writeChunksFromFiles(
 		chunkIndex++;
 		currentBatch = [];
 		currentSize = 0;
+		await reportProgress(true);
 	};
 
 	for (const file of files) {
@@ -323,6 +380,8 @@ export async function writeChunksFromFiles(
 
 		currentBatch.push(base64);
 		currentSize += pageSize;
+		processedPages++;
+		await reportProgress();
 	}
 
 	await flushBatch();

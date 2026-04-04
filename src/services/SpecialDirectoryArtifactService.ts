@@ -9,7 +9,8 @@ import {
 	generateDirectoryZipArtifact,
 	getZipPath,
 	promoteStagingCache,
-	validateZipArtifact
+	validateZipArtifact,
+	ZipArtifactProgress
 } from "(src)/utils/comicCacheUtils";
 import { humanFileSize } from "(src)/utils/fileUtils";
 
@@ -22,6 +23,11 @@ export interface SpecialDirectoryArtifactResult {
 	zipPath?: string;
 	error?: string;
 	elapsedMs: number;
+}
+
+interface ArtifactProgressContext {
+	itemIndex: number;
+	totalItems: number;
 }
 
 export class SpecialDirectoryArtifactService {
@@ -56,8 +62,13 @@ export class SpecialDirectoryArtifactService {
 
 		const worker = async (): Promise<void> => {
 			while (pointer < uniqueFiles.length) {
-				const file = uniqueFiles[pointer++];
-				const result = await this.ensureArtifactForFile(file);
+				const index = pointer++;
+				const file = uniqueFiles[index];
+				const progress = {
+					itemIndex: index + 1,
+					totalItems: uniqueFiles.length
+				} satisfies ArtifactProgressContext;
+				const result = await this.ensureArtifactForFileInternal(file, progress);
 				results.push(result);
 				completed++;
 
@@ -80,9 +91,17 @@ export class SpecialDirectoryArtifactService {
 	}
 
 	public async ensureArtifactForFile(file: File): Promise<SpecialDirectoryArtifactResult> {
+		return this.ensureArtifactForFileInternal(file, undefined);
+	}
+
+	private async ensureArtifactForFileInternal(
+		file: File,
+		progress?: ArtifactProgressContext
+	): Promise<SpecialDirectoryArtifactResult> {
 		const start = Date.now();
 		const sourcePath = `${file.parentPath}/${file.name}`;
 		const zipPath = getZipPath(file.coverId);
+		const itemProgress = this.formatItemProgress(progress);
 
 		if (!SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file)) {
 			return {
@@ -97,7 +116,7 @@ export class SpecialDirectoryArtifactService {
 				const stats = await fs.stat(zipPath);
 				const size = humanFileSize(stats.size, true);
 				await this.updateSpecialDirectorySizeIfNeeded(file, size);
-				logger.info(`artifact-skip-ready coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" path="${sourcePath}".`);
+				logger.info(`artifact-skip-ready ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" path="${sourcePath}".`);
 
 				return {
 					coverId: file.coverId,
@@ -109,14 +128,28 @@ export class SpecialDirectoryArtifactService {
 			}
 
 			if (await fs.pathExists(zipPath)) {
-				logger.info(`artifact-rebuild-invalid coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}".`);
+				logger.info(`artifact-rebuild-invalid ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}".`);
 			}
 
 			const stagingDir = await createCacheStagingDir(file.coverId);
 
-			logger.info(`artifact-build:start coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}".`);
+			logger.info(`artifact-build:start ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}".`);
 			try {
-				const zipResult = await generateDirectoryZipArtifact(sourcePath, file.coverId, stagingDir);
+				let lastEntriesProcessed = 0;
+				let lastBytesProcessed = 0;
+				const zipResult = await generateDirectoryZipArtifact(sourcePath, file.coverId, stagingDir, {
+					onProgress: async (zipProgress) => {
+						if (!this.shouldLogZipProgress(zipProgress, lastEntriesProcessed, lastBytesProcessed)) {
+							return;
+						}
+
+						lastEntriesProcessed = zipProgress.entriesProcessed;
+						lastBytesProcessed = zipProgress.bytesProcessed;
+						logger.info(
+							`artifact-zip-progress ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" entries="${zipProgress.entriesProcessed}/${zipProgress.entriesTotal || -1}" bytes="${humanFileSize(zipProgress.bytesProcessed, true)}/${humanFileSize(zipProgress.bytesTotal, true)}".`
+						);
+					}
+				});
 				if (!(await validateZipArtifact(zipResult.zipPath))) {
 					throw new Error(`Generated zip artifact is invalid for "${sourcePath}".`);
 				}
@@ -125,7 +158,7 @@ export class SpecialDirectoryArtifactService {
 				const stats = await fs.stat(zipPath);
 				const size = humanFileSize(stats.size, true);
 				await this.updateSpecialDirectorySizeIfNeeded(file, size);
-				logger.info(`artifact-build:complete coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" elapsedMs="${Date.now() - start}".`);
+				logger.info(`artifact-build:complete ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" elapsedMs="${Date.now() - start}".`);
 
 				return {
 					coverId: file.coverId,
@@ -139,7 +172,7 @@ export class SpecialDirectoryArtifactService {
 				throw error;
 			}
 		} catch (error) {
-			logger.error(`artifact-build:error coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}":`, error);
+			logger.error(`artifact-build:error ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}":`, error);
 			return {
 				coverId: file.coverId,
 				status: "error",
@@ -161,5 +194,37 @@ export class SpecialDirectoryArtifactService {
 
 		await FileRepository.getInstance().updateSpecialArchiveSize(file.id, size);
 		file.size = size;
+	}
+
+	private formatItemProgress(progress?: ArtifactProgressContext): string {
+		if (!progress) {
+			return "";
+		}
+
+		return `item="${progress.itemIndex}/${progress.totalItems}" `;
+	}
+
+	private shouldLogZipProgress(
+		progress: ZipArtifactProgress,
+		lastEntriesProcessed: number,
+		lastBytesProcessed: number
+	): boolean {
+		if (progress.entriesProcessed <= 0 && progress.bytesProcessed <= 0) {
+			return false;
+		}
+
+		if (progress.entriesProcessed === 1) {
+			return true;
+		}
+
+		if (progress.entriesTotal > 0 && progress.entriesProcessed >= progress.entriesTotal) {
+			return true;
+		}
+
+		if (progress.entriesProcessed >= lastEntriesProcessed + 25) {
+			return true;
+		}
+
+		return progress.bytesProcessed >= lastBytesProcessed + (50 * 1024 * 1024);
 	}
 }

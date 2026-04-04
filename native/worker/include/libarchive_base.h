@@ -23,6 +23,9 @@ public:
                        const EntryProcessor& processor,
                        ProgressCb progressCb,
                        void* userData) override;
+    ArchiveProbeResult probeEntries(const std::string& archivePath,
+                                    int maxEntries,
+                                    int minImages) override;
     void close() override;
 
 protected:

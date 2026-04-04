@@ -27,15 +27,29 @@ import { OpenLibraryService } from "(src)/services/OpenLibraryService";
 import { SpecialDirectoryArtifactService } from "(src)/services/SpecialDirectoryArtifactService";
 import { config } from "(src)/config/configuration";
 import { cleanupCacheBuildRoot } from "(src)/utils/comicCacheUtils";
-import { toEligibleComicSource } from "(src)/utils/archiveDetectionUtils";
+import {
+	ComicEligibilityReason,
+	resolveEligibleComicSource
+} from "(src)/utils/archiveDetectionUtils";
 
 const logger = new Logger("Scanner Service");
+
+interface ScanProgressContext {
+	startedAt: number;
+	lastLoggedAt: number;
+	lastLoggedEntries: number;
+	directoriesSeen: number;
+	filesSeen: number;
+	specialDirectoriesDetected: number;
+}
 
 export class ScannerService {
 	private static instance: ScannerService;
 	private static readonly candidateProgressSmallBatch = 10;
 	private static readonly candidateProgressMediumBatch = 25;
 	private static readonly candidateProgressLargeBatch = 100;
+	private static readonly scanProgressEveryEntries = 500;
+	private static readonly scanProgressEveryMs = 5000;
 
 	private constructor() {
 	}
@@ -51,9 +65,17 @@ export class ScannerService {
 		logger.info(`Scanning: "${rootPath}"`);
 
 		let result = undefined;
+		const progress: ScanProgressContext = {
+			startedAt: Date.now(),
+			lastLoggedAt: Date.now(),
+			lastLoggedEntries: 0,
+			directoriesSeen: 0,
+			filesSeen: 0,
+			specialDirectoriesDetected: 0
+		};
 
 		try {
-			const scanResult = await this.getStructureAndFiles(rootPath);
+			const scanResult = await this.getStructureAndFiles(rootPath, undefined, progress);
 
 			result = {
 				root: rootPath,
@@ -62,6 +84,8 @@ export class ScannerService {
 		} catch (error) {
 			logger.error("Error scanning:", error);
 		}
+
+		this.maybeLogScanProgress(progress, rootPath, true);
 
 		logger.info(`Scanning: "${result ? "Success" : "Failed"}"`);
 
@@ -155,7 +179,7 @@ export class ScannerService {
 				}
 			}, concurrency);
 			logger.info(
-				`Phase 1 complete metadataCompleted="${metadataCompleted}" inserted="${insertCompleted}" failed="${insertFailed}".`
+				`Phase 1 complete completed="${newFiles.length}/${newFiles.length}" metadataCompleted="${metadataCompleted}" inserted="${insertCompleted}" failed="${insertFailed}".`
 			);
 
 			const candidatePreparationStartedAt = Date.now();
@@ -171,19 +195,15 @@ export class ScannerService {
 			logger.info(
 				`Cache candidate inputs ready existing="${existingDbBackedFiles.length}" new="${insertedNewFiles.length}" elapsedMs="${Date.now() - candidatePreparationStartedAt}".`
 			);
-			const existingEligibleSources = this.resolveEligibleComicSources(existingDbBackedFiles, "existing");
-			const newEligibleSources = this.resolveEligibleComicSources(insertedNewFiles, "new");
+			const existingEligibleSources = await this.resolveEligibleComicSources(existingDbBackedFiles, "existing");
+			const newEligibleSources = await this.resolveEligibleComicSources(insertedNewFiles, "new");
 
 			const zipOnlyClassificationStartedAt = Date.now();
 			logger.info(
 				`Resolving ZIP-only special directories existingPool="${currentDbFiles.length}" newPool="${insertedNewFiles.length}".`
 			);
-			const existingZipOnlySpecials = currentDbFiles
-				.filter((file: File) => SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file))
-			;
-			const newZipOnlySpecials = insertedNewFiles
-				.filter((file: File) => SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file))
-			;
+			const existingZipOnlySpecials = this.resolveZipOnlySpecialDirectories(currentDbFiles, "existing");
+			const newZipOnlySpecials = this.resolveZipOnlySpecialDirectories(insertedNewFiles, "new");
 			const zipOnlySpecials = [...existingZipOnlySpecials, ...newZipOnlySpecials];
 			logger.info(
 				`ZIP-only special directories resolved existing="${existingZipOnlySpecials.length}" new="${newZipOnlySpecials.length}" total="${zipOnlySpecials.length}" elapsedMs="${Date.now() - zipOnlyClassificationStartedAt}".`
@@ -204,7 +224,7 @@ export class ScannerService {
 				specialArtifactSkippedCount = specialArtifactResults.filter((result) => result.status === "skipped").length;
 				specialArtifactErrorCount = specialArtifactResults.filter((result) => result.status === "error").length;
 				logger.info(
-					`Phase 2 — special directory artifacts complete ready="${specialArtifactReadyCount}" skipped="${specialArtifactSkippedCount}" error="${specialArtifactErrorCount}".`
+					`Phase 2 — special directory artifacts complete completed="${zipOnlySpecials.length}/${zipOnlySpecials.length}" ready="${specialArtifactReadyCount}" skipped="${specialArtifactSkippedCount}" error="${specialArtifactErrorCount}".`
 				);
 			}
 
@@ -225,7 +245,7 @@ export class ScannerService {
 				errorCount = cacheResults.filter((result) => result.status === "error").length;
 
 				logger.info(
-					`Phase 3 — cache build complete ready="${readyCount}" skipped="${skippedCount}" error="${errorCount}".`
+					`Phase 3 — cache build complete completed="${eligibleSources.length}/${eligibleSources.length}" ready="${readyCount}" skipped="${skippedCount}" error="${errorCount}".`
 				);
 			}
 
@@ -245,7 +265,16 @@ export class ScannerService {
 
 	// Single-pass recursive scan. Detects special directories on first encounter,
 	// so each directory is read from disk exactly once.
-	private async getStructureAndFiles(dirPath: string, dirEntries?: Dirent[]): Promise<ScanResult> {
+	private async getStructureAndFiles(
+		dirPath: string,
+		dirEntries?: Dirent[],
+		progress?: ScanProgressContext
+	): Promise<ScanResult> {
+		if (progress) {
+			progress.directoriesSeen++;
+			this.maybeLogScanProgress(progress, dirPath);
+		}
+
 		const dirHash = generateHash(dirPath);
 		const structure: Directory = {
 			name: path.basename(dirPath),
@@ -265,6 +294,9 @@ export class ScannerService {
 
 				if (specialKind !== FileKind.NONE) {
 					logger.info(`Special directory detected: "${entry.name}" [${specialKind}]`);
+					if (progress) {
+						progress.specialDirectoriesDetected++;
+					}
 					filesList.push({
 						name: entry.name,
 						parentPath: dirPath,
@@ -274,8 +306,9 @@ export class ScannerService {
 						coverId: uuidv4(),
 						fileKind: specialKind
 					});
+					this.maybeLogScanProgress(progress, entryPath);
 				} else {
-					const subdirResult = await this.getStructureAndFiles(entryPath, subEntries);
+					const subdirResult = await this.getStructureAndFiles(entryPath, subEntries, progress);
 					structure.directories.push(subdirResult.directories);
 					filesList.push(...subdirResult.files);
 				}
@@ -290,6 +323,10 @@ export class ScannerService {
 					coverId: uuidv4(),
 					fileKind: FileKind.FILE
 				});
+				if (progress) {
+					progress.filesSeen++;
+				}
+				this.maybeLogScanProgress(progress, entryPath);
 			}
 		}
 
@@ -362,21 +399,24 @@ export class ScannerService {
 		await Promise.all(Array.from({length: Math.min(concurrency, items.length)}, worker));
 	}
 
-	private resolveEligibleComicSources(
+	private async resolveEligibleComicSources(
 		files: File[],
 		scope: "existing" | "new"
-	): EligibleComicSource[] {
+	): Promise<EligibleComicSource[]> {
 		const total = files.length;
 		const progressEvery = this.getCandidateProgressEvery(total);
 		const startedAt = Date.now();
 		const sources: EligibleComicSource[] = [];
 		let skipped = 0;
+		const reasonCounts = new Map<ComicEligibilityReason, number>();
 
 		logger.info(`Resolving comic cache candidates scope="${scope}" total="${total}".`);
 
 		for (let index = 0; index < files.length; index++) {
 			const file = files[index];
-			const source = toEligibleComicSource(file);
+			const resolution = await resolveEligibleComicSource(file);
+			const source = resolution.source;
+			reasonCounts.set(resolution.reason, (reasonCounts.get(resolution.reason) || 0) + 1);
 
 			if (source) {
 				sources.push(source);
@@ -387,16 +427,48 @@ export class ScannerService {
 			const completed = index + 1;
 			if (completed === total || completed % progressEvery === 0) {
 				logger.info(
-					`Candidate resolution progress scope="${scope}" completed="${completed}/${total}" eligible="${sources.length}" skipped="${skipped}" path="${path.join(file.parentPath, file.name)}".`
+					`Candidate resolution progress scope="${scope}" completed="${completed}/${total}" eligible="${sources.length}" skipped="${skipped}" result="${resolution.result}" reason="${resolution.reason}" path="${path.join(file.parentPath, file.name)}".`
 				);
 			}
 		}
 
 		logger.info(
-			`Candidate resolution complete scope="${scope}" total="${total}" eligible="${sources.length}" skipped="${skipped}" elapsedMs="${Date.now() - startedAt}".`
+			`Candidate resolution complete scope="${scope}" total="${total}" eligible="${sources.length}" skipped="${skipped}" reasons="${this.formatReasonCounts(reasonCounts)}" elapsedMs="${Date.now() - startedAt}".`
 		);
 
 		return sources;
+	}
+
+	private resolveZipOnlySpecialDirectories(
+		files: File[],
+		scope: "existing" | "new"
+	): File[] {
+		const total = files.length;
+		const progressEvery = this.getCandidateProgressEvery(total);
+		const startedAt = Date.now();
+		const selected: File[] = [];
+
+		logger.info(`Resolving ZIP-only special directories scope="${scope}" total="${total}".`);
+
+		for (let index = 0; index < files.length; index++) {
+			const file = files[index];
+			if (SpecialDirectoryArtifactService.isZipOnlySpecialDirectory(file)) {
+				selected.push(file);
+			}
+
+			const completed = index + 1;
+			if (completed === total || completed % progressEvery === 0) {
+				logger.info(
+					`ZIP-only classification progress scope="${scope}" completed="${completed}/${total}" selected="${selected.length}" skipped="${completed - selected.length}" path="${path.join(file.parentPath, file.name)}".`
+				);
+			}
+		}
+
+		logger.info(
+			`ZIP-only classification complete scope="${scope}" total="${total}" selected="${selected.length}" skipped="${total - selected.length}" elapsedMs="${Date.now() - startedAt}".`
+		);
+
+		return selected;
 	}
 
 	private getCandidateProgressEvery(total: number): number {
@@ -409,6 +481,34 @@ export class ScannerService {
 		}
 
 		return ScannerService.candidateProgressLargeBatch;
+	}
+
+	private maybeLogScanProgress(progress: ScanProgressContext | undefined, currentPath: string, force: boolean = false): void {
+		if (!progress) {
+			return;
+		}
+
+		const now = Date.now();
+		const entriesSeen = progress.directoriesSeen + progress.filesSeen;
+		const enoughEntries = entriesSeen - progress.lastLoggedEntries >= ScannerService.scanProgressEveryEntries;
+		const enoughTime = now - progress.lastLoggedAt >= ScannerService.scanProgressEveryMs;
+
+		if (!force && !enoughEntries && !enoughTime) {
+			return;
+		}
+
+		progress.lastLoggedAt = now;
+		progress.lastLoggedEntries = entriesSeen;
+		logger.info(
+			`scan-progress directoriesSeen="${progress.directoriesSeen}" filesSeen="${progress.filesSeen}" specialDirectoriesDetected="${progress.specialDirectoriesDetected}" currentPath="${currentPath}" elapsedMs="${now - progress.startedAt}".`
+		);
+	}
+
+	private formatReasonCounts(reasonCounts: Map<ComicEligibilityReason, number>): string {
+		return Array.from(reasonCounts.entries())
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([reason, count]) => `${reason}:${count}`)
+			.join(",");
 	}
 
 	private async fillLocalDetails(file: File): Promise<void> {

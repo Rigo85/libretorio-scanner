@@ -29,6 +29,11 @@ interface CollectedSourceImages {
 	tempDir?: string;
 }
 
+interface CacheBuildProgressContext {
+	itemIndex: number;
+	totalItems: number;
+}
+
 export class ComicChunkCacheService {
 	private static instance: ComicChunkCacheService;
 
@@ -59,7 +64,11 @@ export class ComicChunkCacheService {
 			while (pointer < uniqueSources.length) {
 				const index = pointer++;
 				const source = uniqueSources[index];
-				const result = await this.ensureCacheForSource(source);
+				const progress = {
+					itemIndex: index + 1,
+					totalItems: uniqueSources.length
+				} satisfies CacheBuildProgressContext;
+				const result = await this.ensureCacheForSource(source, progress);
 				results.push(result);
 				completed++;
 				if (result.status === "ready") {
@@ -79,13 +88,17 @@ export class ComicChunkCacheService {
 		return results;
 	}
 
-	public async ensureCacheForSource(source: EligibleComicSource): Promise<ComicCacheBuildResult> {
+	public async ensureCacheForSource(
+		source: EligibleComicSource,
+		progress?: CacheBuildProgressContext
+	): Promise<ComicCacheBuildResult> {
 		const start = Date.now();
 		const validation = await validateChunkCache(source.coverId, source.requiresZipArtifact);
+		const itemProgress = this.formatItemProgress(progress);
 
 		if (validation.valid) {
 			logger.info(
-				`skip-ready coverId="${source.coverId}" chunks="${validation.chunkCount}" pages="${validation.totalPages}" path="${source.sourcePath}".`
+				`skip-ready ${itemProgress}coverId="${source.coverId}" chunks="${validation.chunkCount}" pages="${validation.totalPages}" path="${source.sourcePath}".`
 			);
 
 			return {
@@ -98,7 +111,7 @@ export class ComicChunkCacheService {
 		}
 
 		logger.info(
-			`cache-build:start coverId="${source.coverId}" type="${source.sourceType}" format="${source.archiveFormat || ""}" path="${source.sourcePath}".`
+			`cache-build:start ${itemProgress}coverId="${source.coverId}" type="${source.sourceType}" format="${source.archiveFormat || ""}" path="${source.sourcePath}".`
 		);
 
 		const stagingDir = await createCacheStagingDir(source.coverId);
@@ -112,13 +125,27 @@ export class ComicChunkCacheService {
 			let zipSize = "";
 
 			if (source.requiresZipArtifact) {
-				const zipResult = await generateDirectoryZipArtifact(source.sourcePath, source.coverId, stagingDir);
+				let lastZipEntriesProcessed = 0;
+				let lastZipBytesProcessed = 0;
+				const zipResult = await generateDirectoryZipArtifact(source.sourcePath, source.coverId, stagingDir, {
+					onProgress: async (zipProgress) => {
+						if (!this.shouldLogZipProgress(zipProgress, lastZipEntriesProcessed, lastZipBytesProcessed)) {
+							return;
+						}
+
+						lastZipEntriesProcessed = zipProgress.entriesProcessed;
+						lastZipBytesProcessed = zipProgress.bytesProcessed;
+						logger.info(
+							`cache-build:zip-progress ${itemProgress}coverId="${source.coverId}" entries="${zipProgress.entriesProcessed}/${zipProgress.entriesTotal || -1}" bytes="${humanFileSize(zipProgress.bytesProcessed, true)}/${humanFileSize(zipProgress.bytesTotal, true)}".`
+						);
+					}
+				});
 				zipPath = getZipPath(source.coverId);
 				zipSize = humanFileSize(zipResult.sizeBytes, true);
-				logger.info(`cache-build:zip-ready coverId="${source.coverId}" size="${zipSize}".`);
+				logger.info(`cache-build:zip-ready ${itemProgress}coverId="${source.coverId}" size="${zipSize}".`);
 			}
 
-			const collected = await this.collectSourceImages(source);
+			const collected = await this.collectSourceImages(source, itemProgress);
 			sourceTempDir = collected.tempDir;
 			const imageFiles = collected.imageFiles;
 
@@ -126,7 +153,13 @@ export class ComicChunkCacheService {
 				throw new Error("No image pages found to build chunk cache.");
 			}
 
-			const chunkWriteResult = await writeChunksFromFiles(imageFiles, source.coverId, undefined, stagingDir);
+			const chunkWriteResult = await writeChunksFromFiles(imageFiles, source.coverId, undefined, stagingDir, {
+				onProgress: async (chunkProgress) => {
+					logger.info(
+						`chunk-write:progress ${itemProgress}coverId="${source.coverId}" pages="${chunkProgress.processedPages}/${chunkProgress.totalPages}" chunks="${chunkProgress.chunkCount}".`
+					);
+				}
+			});
 
 			await ComicCacheStateService.getInstance().markReady(statePath, source, {
 				chunkCount: chunkWriteResult.chunkCount,
@@ -151,7 +184,7 @@ export class ComicChunkCacheService {
 			}
 
 			logger.info(
-				`cache-build:complete coverId="${source.coverId}" chunks="${chunkWriteResult.chunkCount}" pages="${chunkWriteResult.totalPages}" elapsedMs="${Date.now() - start}".`
+				`cache-build:complete ${itemProgress}coverId="${source.coverId}" chunks="${chunkWriteResult.chunkCount}" pages="${chunkWriteResult.totalPages}" elapsedMs="${Date.now() - start}".`
 			);
 
 			return {
@@ -165,7 +198,7 @@ export class ComicChunkCacheService {
 		} catch (error) {
 			await cleanupStagingDir(stagingDir);
 
-			logger.error(`cache-build:error coverId="${source.coverId}" path="${source.sourcePath}":`, error);
+			logger.error(`cache-build:error ${itemProgress}coverId="${source.coverId}" path="${source.sourcePath}":`, error);
 
 			return {
 				coverId: source.coverId,
@@ -182,24 +215,25 @@ export class ComicChunkCacheService {
 		}
 	}
 
-	private async collectSourceImages(source: EligibleComicSource): Promise<CollectedSourceImages> {
+	private async collectSourceImages(source: EligibleComicSource, itemProgress: string): Promise<CollectedSourceImages> {
 		if (config.production.scan.cacheResize.enabled) {
-			return this.collectWorkerSourceImages(source);
+			return this.collectWorkerSourceImages(source, itemProgress);
 		}
 
 		if (source.sourceType === "directory") {
+			logger.info(`cache-build:source-read ${itemProgress}coverId="${source.coverId}" type="${source.sourceType}" path="${source.sourcePath}".`);
 			return {
 				imageFiles: await collectSortedDirectoryImages(source.sourcePath)
 			};
 		}
 
-		return await this.collectLegacyArchiveImages(source);
+		return await this.collectLegacyArchiveImages(source, itemProgress);
 	}
 
-	private async collectWorkerSourceImages(source: EligibleComicSource): Promise<CollectedSourceImages> {
+	private async collectWorkerSourceImages(source: EligibleComicSource, itemProgress: string): Promise<CollectedSourceImages> {
 		const extraction = await NativeComicCacheWorkerService.getInstance().extractSourceToOrderedRaw(source);
 		logger.info(
-			`cache-build:source-raw-ready coverId="${source.coverId}" type="${source.sourceType}" backend="${extraction.detectedBackend || source.archiveFormat || ""}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
+			`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" type="${source.sourceType}" backend="${extraction.detectedBackend || source.archiveFormat || ""}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
 		);
 
 		const imageFiles = await collectSortedDirectoryImages(extraction.rawDir);
@@ -256,7 +290,7 @@ export class ComicChunkCacheService {
 		}
 	}
 
-	private async collectArchiveImages(source: EligibleComicSource) {
+	private async collectArchiveImages(source: EligibleComicSource, itemProgress: string) {
 		if (!source.archiveFormat) {
 			throw new Error(`Missing archive format for "${source.sourcePath}".`);
 		}
@@ -267,7 +301,7 @@ export class ComicChunkCacheService {
 			source.archiveFormat
 		);
 		logger.info(
-			`cache-build:archive-raw-ready coverId="${source.coverId}" backend="${extraction.detectedBackend || source.archiveFormat}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
+			`cache-build:archive-raw-ready ${itemProgress}coverId="${source.coverId}" backend="${extraction.detectedBackend || source.archiveFormat}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
 		);
 
 		return {
@@ -276,7 +310,39 @@ export class ComicChunkCacheService {
 		};
 	}
 
-	private async collectLegacyArchiveImages(source: EligibleComicSource): Promise<CollectedSourceImages> {
-		return this.collectArchiveImages(source);
+	private async collectLegacyArchiveImages(source: EligibleComicSource, itemProgress: string): Promise<CollectedSourceImages> {
+		return this.collectArchiveImages(source, itemProgress);
+	}
+
+	private formatItemProgress(progress?: CacheBuildProgressContext): string {
+		if (!progress) {
+			return "";
+		}
+
+		return `item="${progress.itemIndex}/${progress.totalItems}" `;
+	}
+
+	private shouldLogZipProgress(
+		progress: { entriesProcessed: number; entriesTotal: number; bytesProcessed: number; bytesTotal: number },
+		lastEntriesProcessed: number,
+		lastBytesProcessed: number
+	): boolean {
+		if (progress.entriesProcessed <= 0 && progress.bytesProcessed <= 0) {
+			return false;
+		}
+
+		if (progress.entriesProcessed === 1) {
+			return true;
+		}
+
+		if (progress.entriesTotal > 0 && progress.entriesProcessed >= progress.entriesTotal) {
+			return true;
+		}
+
+		if (progress.entriesProcessed >= lastEntriesProcessed + 25) {
+			return true;
+		}
+
+		return progress.bytesProcessed >= lastBytesProcessed + (50 * 1024 * 1024);
 	}
 }

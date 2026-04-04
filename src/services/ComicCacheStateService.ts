@@ -11,7 +11,14 @@ interface BaseStateInput {
 	sourcePath: string;
 	sourceType: ComicSourceType;
 	archiveFormat?: ComicArchiveFormat;
+	fileHash?: string;
 }
+
+type BaseStateOutput = Omit<
+ComicCacheState,
+"status" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "lastError" |
+"ignoreReason" | "probeEntriesScanned" | "probeImageCount" | "probeMaxEntries" | "probeMinImages"
+>;
 
 export class ComicCacheStateService {
 	private static instance: ComicCacheStateService;
@@ -49,7 +56,8 @@ export class ComicCacheStateService {
 		const nextState = this.buildBaseState({
 			sourcePath: source.sourcePath,
 			sourceType: source.sourceType,
-			archiveFormat: source.archiveFormat
+			archiveFormat: source.archiveFormat,
+			fileHash: source.fileHash
 		}, previous);
 
 		const state: ComicCacheState = {
@@ -59,7 +67,12 @@ export class ComicCacheStateService {
 			totalPages: 0,
 			zipReady: false,
 			chunksReady: false,
-			lastError: undefined
+			lastError: undefined,
+			ignoreReason: undefined,
+			probeEntriesScanned: undefined,
+			probeImageCount: undefined,
+			probeMaxEntries: undefined,
+			probeMinImages: undefined
 		};
 
 		await this.write(statePath, state);
@@ -79,7 +92,8 @@ export class ComicCacheStateService {
 		const nextState = this.buildBaseState({
 			sourcePath: source.sourcePath,
 			sourceType: source.sourceType,
-			archiveFormat: source.archiveFormat
+			archiveFormat: source.archiveFormat,
+			fileHash: source.fileHash
 		}, previous);
 
 		const state: ComicCacheState = {
@@ -89,7 +103,12 @@ export class ComicCacheStateService {
 			totalPages: payload.totalPages,
 			zipReady: payload.zipReady,
 			chunksReady: true,
-			lastError: undefined
+			lastError: undefined,
+			ignoreReason: undefined,
+			probeEntriesScanned: undefined,
+			probeImageCount: undefined,
+			probeMaxEntries: undefined,
+			probeMinImages: undefined
 		};
 
 		await this.write(statePath, state);
@@ -105,7 +124,8 @@ export class ComicCacheStateService {
 		const nextState = this.buildBaseState({
 			sourcePath: source.sourcePath,
 			sourceType: source.sourceType,
-			archiveFormat: source.archiveFormat
+			archiveFormat: source.archiveFormat,
+			fileHash: source.fileHash
 		}, previous);
 
 		const state: ComicCacheState = {
@@ -115,7 +135,44 @@ export class ComicCacheStateService {
 			totalPages: 0,
 			zipReady: false,
 			chunksReady: false,
-			lastError: errorMessage
+			lastError: errorMessage,
+			ignoreReason: undefined,
+			probeEntriesScanned: undefined,
+			probeImageCount: undefined,
+			probeMaxEntries: undefined,
+			probeMinImages: undefined
+		};
+
+		await this.write(statePath, state);
+		return state;
+	}
+
+	public async markIgnored(
+		statePath: string,
+		payload: BaseStateInput & {
+			reason: string;
+			probeEntriesScanned?: number;
+			probeImageCount?: number;
+			probeMaxEntries?: number;
+			probeMinImages?: number;
+		}
+	): Promise<ComicCacheState> {
+		const previous = await this.read(statePath);
+		const nextState = this.buildBaseState(payload, previous);
+
+		const state: ComicCacheState = {
+			...nextState,
+			status: "ignored",
+			chunkCount: 0,
+			totalPages: 0,
+			zipReady: false,
+			chunksReady: false,
+			lastError: undefined,
+			ignoreReason: payload.reason,
+			probeEntriesScanned: payload.probeEntriesScanned,
+			probeImageCount: payload.probeImageCount,
+			probeMaxEntries: payload.probeMaxEntries,
+			probeMinImages: payload.probeMinImages
 		};
 
 		await this.write(statePath, state);
@@ -125,7 +182,7 @@ export class ComicCacheStateService {
 	private buildBaseState(
 		input: BaseStateInput,
 		previous?: ComicCacheState
-	): Omit<ComicCacheState, "status" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "lastError"> {
+	): BaseStateOutput {
 		const now = new Date().toISOString();
 
 		return {
@@ -133,6 +190,7 @@ export class ComicCacheStateService {
 			sourcePath: input.sourcePath,
 			sourceType: input.sourceType,
 			archiveFormat: input.archiveFormat,
+			fileHash: input.fileHash,
 			createdAt: previous?.createdAt || now,
 			updatedAt: now
 		};

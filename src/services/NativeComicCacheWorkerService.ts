@@ -46,8 +46,16 @@ interface NativeWorkerExtractResult {
 	manifest?: NativeWorkerManifest;
 }
 
+export interface NativeWorkerProbeResult {
+	accepted: boolean;
+	reason: string;
+	entriesScanned: number;
+	imageCount: number;
+	detectedBackend?: ComicArchiveFormat;
+}
+
 interface WorkerEvent {
-	type: "start" | "extracting" | "complete" | "warning" | "error";
+	type: "start" | "extracting" | "complete" | "warning" | "error" | "probe-complete";
 	current?: number;
 	total?: number;
 	name?: string;
@@ -59,6 +67,10 @@ interface WorkerEvent {
 	message?: string;
 	requested?: string;
 	detected?: string;
+	accepted?: boolean;
+	reason?: string;
+	entriesScanned?: number;
+	imageCount?: number;
 }
 
 export class NativeComicCacheWorkerService {
@@ -164,6 +176,48 @@ export class NativeComicCacheWorkerService {
 		}
 	}
 
+	public async probeArchiveForComic(
+		inputPath: string,
+		coverId: string,
+		backend: ComicArchiveFormat,
+		options?: { maxEntries?: number; minImages?: number }
+	): Promise<NativeWorkerProbeResult> {
+		const nativeBinary = await this.findNativeBinaryPath();
+		if (!nativeBinary) {
+			logger.info(`Native worker not found for probe "${inputPath}", accepting generic archive by fallback.`);
+			return {
+				accepted: true,
+				reason: "probe_unavailable",
+				entriesScanned: 0,
+				imageCount: 0,
+				detectedBackend: backend
+			};
+		}
+
+		const maxEntries = options?.maxEntries ?? config.production.scan.cacheProbe.maxEntries;
+		const minImages = options?.minImages ?? config.production.scan.cacheProbe.minImages;
+
+		try {
+			return await this.runNativeProbe(nativeBinary, [
+				"--probe",
+				"--input", inputPath,
+				"--backend", backend,
+				"--probe-max-entries", `${maxEntries}`,
+				"--probe-min-images", `${minImages}`
+			], coverId, backend);
+		} catch (error) {
+			logger.error(`runNativeProbe "${inputPath}":`, error);
+			logger.info(`Probe fallback accept for "${inputPath}" because native probe failed.`);
+			return {
+				accepted: true,
+				reason: "probe_failed",
+				entriesScanned: 0,
+				imageCount: 0,
+				detectedBackend: backend
+			};
+		}
+	}
+
 	private async findNativeBinaryPath(): Promise<string | undefined> {
 		const executable = process.platform === "win32" ? "comic-cache-worker.exe" : "comic-cache-worker";
 		const candidates = [
@@ -266,6 +320,91 @@ export class NativeComicCacheWorkerService {
 					resolve({totalPages, detectedBackend: backend, manifestPath, manifest});
 				} else {
 					reject(new Error(`worker exited with code ${code}`));
+				}
+			});
+		});
+	}
+
+	private async runNativeProbe(
+		binaryPath: string,
+		args: string[],
+		coverId: string,
+		backend?: ComicArchiveFormat
+	): Promise<NativeWorkerProbeResult> {
+		logger.info(`Using native worker probe "${binaryPath}" with coverId="${coverId}" args="${args.join(" ")}".`);
+		return await new Promise((resolve, reject) => {
+			const proc = spawn(binaryPath, args, {
+				stdio: ["ignore", "pipe", "pipe"]
+			});
+			let completed = false;
+			let accepted = false;
+			let reason = "probe_failed";
+			let entriesScanned = 0;
+			let imageCount = 0;
+			let detectedBackend: ComicArchiveFormat | undefined = backend;
+			const inputPath = this.readCliValue(args, "--input") || "";
+
+			this.attachLineReader(proc.stdout, (line) => {
+				const event = this.parseWorkerEvent(line);
+				if (!event) {
+					logger.info(`worker probe stdout coverId="${coverId}": ${line}`);
+					return;
+				}
+
+				if (event.type === "start") {
+					logger.info(
+						`worker-probe:start coverId="${coverId}" backend="${event.backend || backend}" input="${event.input || inputPath}".`
+					);
+					return;
+				}
+
+				if (event.type === "warning") {
+					logger.info(
+						`worker-probe:warning coverId="${coverId}" message="${event.message || ""}" requested="${event.requested || ""}" detected="${event.detected || ""}".`
+					);
+					return;
+				}
+
+				if (event.type === "probe-complete") {
+					completed = true;
+					accepted = event.accepted === true;
+					reason = event.reason || "probe_failed";
+					entriesScanned = event.entriesScanned || 0;
+					imageCount = event.imageCount || 0;
+					detectedBackend = this.normalizeWorkerBackend(event.backend) || backend;
+					logger.info(
+						`worker-probe:complete coverId="${coverId}" backend="${detectedBackend || ""}" accepted="${accepted}" entries="${entriesScanned}" images="${imageCount}" reason="${reason}".`
+					);
+					return;
+				}
+
+				if (event.type === "error") {
+					logger.error(`worker-probe:error coverId="${coverId}" message="${event.message || "unknown"}".`);
+				}
+			});
+
+			this.attachLineReader(proc.stderr, (line) => {
+				const event = this.parseWorkerEvent(line);
+				if (event?.type === "error") {
+					logger.error(`worker-probe:stderr-error coverId="${coverId}" message="${event.message || "unknown"}".`);
+					return;
+				}
+
+				logger.info(`worker probe stderr coverId="${coverId}": ${line}`);
+			});
+
+			proc.on("error", reject);
+			proc.on("close", (code) => {
+				if (code === 0 && completed) {
+					resolve({
+						accepted,
+						reason,
+						entriesScanned,
+						imageCount,
+						detectedBackend
+					});
+				} else {
+					reject(new Error(`worker probe exited with code ${code}`));
 				}
 			});
 		});

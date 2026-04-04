@@ -53,6 +53,24 @@ std::vector<uint8_t> readArchiveEntryData(archive* arc) {
     return output;
 }
 
+ArchiveProbeResult finalizeProbeResult(const ArchiveProbeResult& partial, int minImages) {
+    ArchiveProbeResult result = partial;
+    if (result.accepted) {
+        result.reason = "accepted";
+        return result;
+    }
+
+    result.reason = result.imageCount <= 0 ? "no_images" : "below_min_images";
+    if (result.entriesScanned < 1 && result.reason == "no_images") {
+        result.reason = "no_entries";
+    }
+    if (result.imageCount >= minImages) {
+        result.accepted = true;
+        result.reason = "accepted";
+    }
+    return result;
+}
+
 }  // namespace
 
 archive* LibarchiveBackend::openArchive(const std::string& archivePath) const {
@@ -162,6 +180,45 @@ int LibarchiveBackend::processEntries(const std::string& archivePath,
     archive_read_close(arc);
     archive_read_free(arc);
     return processedCount;
+}
+
+ArchiveProbeResult LibarchiveBackend::probeEntries(const std::string& archivePath, int maxEntries, int minImages) {
+    ArchiveProbeResult result;
+    archive* arc = openArchive(archivePath);
+    archive_entry* entry = nullptr;
+
+    while (true) {
+        const int headerStatus = archive_read_next_header(arc, &entry);
+        if (headerStatus == ARCHIVE_EOF) break;
+        if (headerStatus == ARCHIVE_RETRY) continue;
+        if (headerStatus != ARCHIVE_OK && headerStatus != ARCHIVE_WARN) break;
+
+        const std::string name = archiveEntryPathUtf8(entry);
+        const bool isDir = archive_entry_filetype(entry) == AE_IFDIR;
+        if (isDir || isJunkArchiveEntry(name)) {
+            archive_read_data_skip(arc);
+            continue;
+        }
+
+        result.entriesScanned++;
+        if (isImageArchiveEntry(name)) {
+            result.imageCount++;
+            if (result.imageCount >= minImages) {
+                result.accepted = true;
+                archive_read_data_skip(arc);
+                break;
+            }
+        }
+
+        archive_read_data_skip(arc);
+        if (result.entriesScanned >= maxEntries) {
+            break;
+        }
+    }
+
+    archive_read_close(arc);
+    archive_read_free(arc);
+    return finalizeProbeResult(result, minImages);
 }
 
 void LibarchiveBackend::close() {

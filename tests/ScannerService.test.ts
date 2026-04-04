@@ -62,12 +62,14 @@ describe("ScannerService orchestration", () => {
 		await scanner.scanCompareUpdate("/library");
 
 		const joinedLogs = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
-		expect(joinedLogs).toContain("Phase 1 complete metadataCompleted=\"0\" inserted=\"0\" failed=\"0\".");
+		expect(joinedLogs).toContain("Phase 1 complete completed=\"0/0\" metadataCompleted=\"0\" inserted=\"0\" failed=\"0\".");
 		expect(joinedLogs).toContain("Preparing cache candidate inputs scanFiles=\"1\" existingDbFiles=\"1\" newInsertedFiles=\"0\".");
 		expect(joinedLogs).toContain("Resolving comic cache candidates scope=\"existing\" total=\"1\".");
-		expect(joinedLogs).toContain("Candidate resolution progress scope=\"existing\" completed=\"1/1\" eligible=\"1\" skipped=\"0\" path=\"/library/backlog.cbz\".");
+		expect(joinedLogs).toContain("Candidate resolution progress scope=\"existing\" completed=\"1/1\" eligible=\"1\" skipped=\"0\" result=\"eligible\" reason=\"direct-comic-extension\" path=\"/library/backlog.cbz\".");
 		expect(joinedLogs).toContain("Candidate resolution complete scope=\"existing\" total=\"1\" eligible=\"1\" skipped=\"0\"");
 		expect(joinedLogs).toContain("Resolving comic cache candidates scope=\"new\" total=\"0\".");
+		expect(joinedLogs).toContain("Resolving ZIP-only special directories scope=\"existing\" total=\"1\".");
+		expect(joinedLogs).toContain("ZIP-only classification progress scope=\"existing\" completed=\"1/1\" selected=\"0\" skipped=\"1\" path=\"/library/backlog.cbz\".");
 	});
 
 	it("still resolves metadata and inserts new files even when comic cache is already ready or skipped", async () => {
