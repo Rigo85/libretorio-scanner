@@ -30,12 +30,14 @@ public:
     /// Process all image entries from the archive in a single sequential pass.
     /// The processor receives the final sorted index, entry descriptor, and raw entry bytes.
     using EntryProcessor = std::function<void(int sortedIndex, const CanonicalArchiveEntry&, std::vector<uint8_t>&&)>;
+    using WarningCb = std::function<void(int sortedIndex, const CanonicalArchiveEntry&, const std::string& message)>;
 
     /// progressCb is called after each entry: (currentIndex, totalEstimate, entryName)
     using ProgressCb = void(*)(int current, int total, const std::string& name, void* userData);
     virtual int processEntries(const std::string& archivePath,
                                const std::vector<CanonicalArchiveEntry>& entries,
                                const EntryProcessor& processor,
+                               const WarningCb& warningCb = nullptr,
                                ProgressCb progressCb = nullptr,
                                void* userData = nullptr) = 0;
 

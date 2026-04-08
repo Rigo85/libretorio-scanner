@@ -16,7 +16,7 @@ interface BaseStateInput {
 
 type BaseStateOutput = Omit<
 ComicCacheState,
-"status" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "lastError"
+"status" | "buildOutcome" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "droppedPages" | "warningCount" | "lastWarnings" | "lastError"
 >;
 
 export class ComicCacheStateService {
@@ -62,10 +62,14 @@ export class ComicCacheStateService {
 		const state: ComicCacheState = {
 			...nextState,
 			status: "building",
+			buildOutcome: undefined,
 			chunkCount: 0,
 			totalPages: 0,
 			zipReady: false,
 			chunksReady: false,
+			droppedPages: undefined,
+			warningCount: undefined,
+			lastWarnings: undefined,
 			lastError: undefined
 		};
 
@@ -80,6 +84,10 @@ export class ComicCacheStateService {
 			chunkCount: number;
 			totalPages: number;
 			zipReady: boolean;
+			buildOutcome?: "complete" | "partial";
+			droppedPages?: number;
+			warningCount?: number;
+			lastWarnings?: string[];
 		}
 	): Promise<ComicCacheState> {
 		const previous = await this.read(statePath);
@@ -93,10 +101,14 @@ export class ComicCacheStateService {
 		const state: ComicCacheState = {
 			...nextState,
 			status: "ready",
+			buildOutcome: payload.buildOutcome || "complete",
 			chunkCount: payload.chunkCount,
 			totalPages: payload.totalPages,
 			zipReady: payload.zipReady,
 			chunksReady: true,
+			droppedPages: payload.droppedPages || 0,
+			warningCount: payload.warningCount || 0,
+			lastWarnings: payload.lastWarnings?.slice(0, 5),
 			lastError: undefined
 		};
 
@@ -120,10 +132,14 @@ export class ComicCacheStateService {
 		const state: ComicCacheState = {
 			...nextState,
 			status: "error",
+			buildOutcome: undefined,
 			chunkCount: 0,
 			totalPages: 0,
 			zipReady: false,
 			chunksReady: false,
+			droppedPages: undefined,
+			warningCount: undefined,
+			lastWarnings: undefined,
 			lastError: errorMessage
 		};
 

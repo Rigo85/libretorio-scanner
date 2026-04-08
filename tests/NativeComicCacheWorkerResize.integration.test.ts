@@ -218,6 +218,37 @@ describe("NativeComicCacheWorker resize integration", () => {
 		}
 	});
 
+	it("returns a partial manifest for directory input when one image is unreadable", async () => {
+		const sourceDir = path.join(tempDir, "directory-partial");
+		await fs.ensureDir(sourceDir);
+		await fs.writeFile(path.join(sourceDir, "000-empty.jpg"), "");
+		await createSolidImage(path.join(sourceDir, "001-good.png"), 1800, 1200, "png");
+
+		const source: EligibleComicSource = {
+			coverId: "cover-directory-partial",
+			fileHash: "hash-directory-partial",
+			name: "directory-partial",
+			parentPath: tempDir,
+			fileKind: FileKind.COMIC_MANGA,
+			sourcePath: sourceDir,
+			sourceType: "directory",
+			requiresZipArtifact: true
+		};
+
+		const extraction = await service.extractSourceToOrderedRaw(source);
+
+		try {
+			expect(extraction.manifest?.status).toBe("partial");
+			expect(extraction.manifest?.droppedPages).toBe(1);
+			expect(extraction.manifest?.warningCount).toBe(1);
+			expect(extraction.manifest?.pages).toHaveLength(1);
+			expect(extraction.manifest?.warnings?.[0]?.originalName).toBe("000-empty.jpg");
+			expect(path.basename(extraction.manifest!.pages![0].raw)).toBe("000001.png");
+		} finally {
+			await fs.rm(extraction.tempDir, {recursive: true, force: true});
+		}
+	});
+
 	it("processes archive-file input with the same resize policy and manifest contract", async () => {
 		const sourceDir = path.join(tempDir, "archive-pages");
 		const archivePath = path.join(tempDir, "chapter.cbz");

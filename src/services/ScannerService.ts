@@ -43,6 +43,14 @@ interface ScanProgressContext {
 	specialDirectoriesDetected: number;
 }
 
+interface CacheGarbageCollectionSummary {
+	cacheDirsTotal: number;
+	liveCoverIds: number;
+	candidates: number;
+	removed: number;
+	bytesFreed: number;
+}
+
 export class ScannerService {
 	private static instance: ScannerService;
 	private static readonly candidateProgressSmallBatch = 10;
@@ -250,10 +258,12 @@ export class ScannerService {
 			}
 
 			await ScanRootRepository.getInstance().updateScanRoot(JSON.stringify(scanRootResult.scan.directories), scanRoot.id);
+			const cacheGcSummary = await this.runCacheGarbageCollection();
 			logger.info(
 				`scanCompareUpdate summary scanRoot="${scanRootPath}" newFiles="${newFiles.length}" inserted="${insertedNewFiles.length}" ` +
 				`specialZipReady="${specialArtifactReadyCount}" specialZipSkipped="${specialArtifactSkippedCount}" specialZipError="${specialArtifactErrorCount}" ` +
 				`eligible="${eligibleSources.length}" cacheReady="${readyCount}" cacheSkipped="${skippedCount}" cacheError="${errorCount}" ` +
+				`cacheGcCandidates="${cacheGcSummary.candidates}" cacheGcRemoved="${cacheGcSummary.removed}" cacheGcBytesFreed="${humanFileSize(cacheGcSummary.bytesFreed, true)}" ` +
 				`removedByParentHash="${removedFilesCount}" removedByFileHash="${removedByFileHashCount}" ` +
 				`metadataCompleted="${metadataCompleted}" insertFailed="${insertFailed}" ` +
 				`firstInsertMs="${firstInsertElapsedMs ?? -1}" totalMs="${Date.now() - scanStartedAt}".`
@@ -509,6 +519,101 @@ export class ScannerService {
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([reason, count]) => `${reason}:${count}`)
 			.join(",");
+	}
+
+	private async runCacheGarbageCollection(): Promise<CacheGarbageCollectionSummary> {
+		const liveCoverIds = await FileRepository.getInstance().getAllCoverIds();
+		if (!liveCoverIds) {
+			logger.error("Phase 4 — cache garbage collection skipped reason=\"live-coverid-query-failed\".");
+			return {
+				cacheDirsTotal: 0,
+				liveCoverIds: 0,
+				candidates: 0,
+				removed: 0,
+				bytesFreed: 0
+			};
+		}
+
+		const cacheRoot = config.production.paths.cache;
+		if (!(await fs.pathExists(cacheRoot))) {
+			logger.info(`Phase 4 — cache garbage collection complete completed="0/0" removed="0" bytesFreed="${humanFileSize(0, true)}".`);
+			return {
+				cacheDirsTotal: 0,
+				liveCoverIds: liveCoverIds.length,
+				candidates: 0,
+				removed: 0,
+				bytesFreed: 0
+			};
+		}
+
+		const entries = await fs.readdir(cacheRoot, {withFileTypes: true});
+		const cacheDirs = entries
+			.filter((entry: Dirent) => entry.isDirectory())
+			.map((entry: Dirent) => entry.name)
+			.filter((entryName: string) => entryName !== ".scanner-build")
+		;
+		const liveCoverIdSet = new Set(liveCoverIds);
+		const candidates = cacheDirs.filter((coverId: string) => !liveCoverIdSet.has(coverId));
+		logger.info(
+			`Phase 4 — cache garbage collection totalCacheDirs="${cacheDirs.length}" liveCoverIds="${liveCoverIds.length}" candidates="${candidates.length}".`
+		);
+
+		let removed = 0;
+		let bytesFreed = 0;
+
+		for (let index = 0; index < candidates.length; index++) {
+			const coverId = candidates[index];
+			const cacheDirPath = path.join(cacheRoot, coverId);
+			const sizeBytes = await this.getDirectorySizeBytes(cacheDirPath);
+			await fs.rm(cacheDirPath, {recursive: true, force: true});
+			removed++;
+			bytesFreed += sizeBytes;
+			logger.info(
+				`cache-gc:delete item="${index + 1}/${candidates.length}" coverId="${coverId}" size="${humanFileSize(sizeBytes, true)}".`
+			);
+			logger.info(
+				`cache-gc:progress completed="${index + 1}/${candidates.length}" removed="${removed}" bytesFreed="${humanFileSize(bytesFreed, true)}".`
+			);
+		}
+
+		logger.info(
+			`Phase 4 — cache garbage collection complete completed="${candidates.length}/${candidates.length}" removed="${removed}" bytesFreed="${humanFileSize(bytesFreed, true)}".`
+		);
+
+		return {
+			cacheDirsTotal: cacheDirs.length,
+			liveCoverIds: liveCoverIds.length,
+			candidates: candidates.length,
+			removed,
+			bytesFreed
+		};
+	}
+
+	private async getDirectorySizeBytes(targetPath: string): Promise<number> {
+		if (!(await fs.pathExists(targetPath))) {
+			return 0;
+		}
+
+		const stats = await fs.stat(targetPath);
+		if (!stats.isDirectory()) {
+			return stats.size;
+		}
+
+		let total = 0;
+		const entries = await fs.readdir(targetPath, {withFileTypes: true});
+		for (const entry of entries) {
+			const entryPath = path.join(targetPath, entry.name);
+			if (entry.isDirectory()) {
+				total += await this.getDirectorySizeBytes(entryPath);
+				continue;
+			}
+
+			if (entry.isFile()) {
+				total += (await fs.stat(entryPath)).size;
+			}
+		}
+
+		return total;
 	}
 
 	private async fillLocalDetails(file: File): Promise<void> {

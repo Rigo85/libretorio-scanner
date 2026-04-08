@@ -165,4 +165,42 @@ describe("ComicChunkCacheService resize integration", () => {
 		});
 		await expect(fs.pathExists(getZipPath(coverId))).resolves.toBe(false);
 	});
+
+	it("persists ready+partial cache state when one directory page is dropped", async () => {
+		const sourceDir = path.join(tempDir, "comic-directory-partial");
+		const coverId = "cover-comic-directory-partial";
+		await fs.ensureDir(sourceDir);
+		await fs.writeFile(path.join(sourceDir, "000-empty.jpg"), "");
+		await createSolidImage(path.join(sourceDir, "001-good.png"), 1600, 1000);
+
+		const source: EligibleComicSource = {
+			coverId,
+			fileHash: "hash-comic-directory-partial",
+			name: "comic-directory-partial",
+			parentPath: tempDir,
+			fileKind: FileKind.COMIC_MANGA,
+			sourcePath: sourceDir,
+			sourceType: "directory",
+			requiresZipArtifact: true
+		};
+
+		const result = await service.ensureCacheForSource(source);
+
+		expect(result.status).toBe("ready");
+		expect(result.buildOutcome).toBe("partial");
+		expect(result.droppedPages).toBe(1);
+		expect(result.warningCount).toBe(1);
+		await expect(validateChunkCache(coverId, true)).resolves.toEqual({
+			valid: true,
+			chunkCount: 1,
+			totalPages: 1
+		});
+
+		const state = await ComicCacheStateService.getInstance().read(getStatePath(coverId));
+		expect(state?.status).toBe("ready");
+		expect(state?.buildOutcome).toBe("partial");
+		expect(state?.droppedPages).toBe(1);
+		expect(state?.warningCount).toBe(1);
+		expect(state?.lastWarnings?.[0]).toContain("000-empty.jpg");
+	});
 });

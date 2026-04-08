@@ -27,6 +27,12 @@ const logger = new Logger("ComicChunkCache");
 interface CollectedSourceImages {
 	imageFiles: ImageFileEntry[];
 	tempDir?: string;
+	manifest?: {
+		status?: "complete" | "partial";
+		droppedPages?: number;
+		warningCount?: number;
+		warnings?: Array<{ originalName?: string; message?: string }>;
+	};
 }
 
 interface CacheBuildProgressContext {
@@ -161,10 +167,19 @@ export class ComicChunkCacheService {
 				}
 			});
 
+			const buildOutcome = extractionBuildOutcomeFromManifest(collected);
+			const droppedPages = extractionDroppedPagesFromManifest(collected);
+			const warningCount = extractionWarningCountFromManifest(collected);
+			const lastWarnings = extractionLastWarningsFromManifest(collected);
+
 			await ComicCacheStateService.getInstance().markReady(statePath, source, {
 				chunkCount: chunkWriteResult.chunkCount,
 				totalPages: chunkWriteResult.totalPages,
-				zipReady: source.requiresZipArtifact
+				zipReady: source.requiresZipArtifact,
+				buildOutcome,
+				droppedPages,
+				warningCount,
+				lastWarnings
 			});
 
 			const stagingValidation = await validateChunkCache(source.coverId, source.requiresZipArtifact, stagingDir);
@@ -184,14 +199,17 @@ export class ComicChunkCacheService {
 			}
 
 			logger.info(
-				`cache-build:complete ${itemProgress}coverId="${source.coverId}" chunks="${chunkWriteResult.chunkCount}" pages="${chunkWriteResult.totalPages}" elapsedMs="${Date.now() - start}".`
+				`cache-build:complete ${itemProgress}coverId="${source.coverId}" outcome="${buildOutcome}" droppedPages="${droppedPages}" warnings="${warningCount}" chunks="${chunkWriteResult.chunkCount}" pages="${chunkWriteResult.totalPages}" elapsedMs="${Date.now() - start}".`
 			);
 
 			return {
 				coverId: source.coverId,
 				status: "ready",
+				buildOutcome,
 				totalPages: chunkWriteResult.totalPages,
 				chunkCount: chunkWriteResult.chunkCount,
+				droppedPages,
+				warningCount,
 				zipPath,
 				elapsedMs: Date.now() - start
 			};
@@ -248,11 +266,11 @@ export class ComicChunkCacheService {
 		const extraction = await NativeComicCacheWorkerService.getInstance().extractSourceToOrderedRaw(source);
 		if (source.sourceType === "directory") {
 			logger.info(
-				`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" sourceType="directory" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
+				`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" sourceType="directory" outcome="${extraction.manifest?.status || "complete"}" droppedPages="${extraction.manifest?.droppedPages || 0}" warnings="${extraction.manifest?.warningCount || 0}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
 			);
 		} else {
 			logger.info(
-				`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" sourceType="${source.sourceType}" backend="${extraction.detectedBackend || source.archiveFormat || ""}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
+				`cache-build:source-raw-ready ${itemProgress}coverId="${source.coverId}" sourceType="${source.sourceType}" backend="${extraction.detectedBackend || source.archiveFormat || ""}" outcome="${extraction.manifest?.status || "complete"}" droppedPages="${extraction.manifest?.droppedPages || 0}" warnings="${extraction.manifest?.warningCount || 0}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
 			);
 		}
 
@@ -260,7 +278,8 @@ export class ComicChunkCacheService {
 		this.validateWorkerExtraction(source, extraction, imageFiles);
 		return {
 			imageFiles,
-			tempDir: extraction.tempDir
+			tempDir: extraction.tempDir,
+			manifest: extraction.manifest
 		};
 	}
 
@@ -281,8 +300,8 @@ export class ComicChunkCacheService {
 		}
 
 		const manifest = extraction.manifest;
-		if (manifest.status !== "complete") {
-			throw new Error(`Worker manifest is not complete for "${source.sourcePath}".`);
+		if (manifest.status !== "complete" && manifest.status !== "partial") {
+			throw new Error(`Worker manifest has unsupported status for "${source.sourcePath}": "${manifest.status || "unknown"}".`);
 		}
 
 		if (!Array.isArray(manifest.pages) || manifest.pages.length < 1) {
@@ -321,12 +340,13 @@ export class ComicChunkCacheService {
 			source.archiveFormat
 		);
 		logger.info(
-			`cache-build:archive-raw-ready ${itemProgress}coverId="${source.coverId}" backend="${extraction.detectedBackend || source.archiveFormat}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
+			`cache-build:archive-raw-ready ${itemProgress}coverId="${source.coverId}" backend="${extraction.detectedBackend || source.archiveFormat}" outcome="${extraction.manifest?.status || "complete"}" droppedPages="${extraction.manifest?.droppedPages || 0}" warnings="${extraction.manifest?.warningCount || 0}" pages="${extraction.totalPages || 0}" manifest="${extraction.manifestPath || ""}".`
 		);
 
 		return {
 			imageFiles: await collectSortedDirectoryImages(extraction.rawDir),
-			tempDir: extraction.tempDir
+			tempDir: extraction.tempDir,
+			manifest: extraction.manifest
 		};
 	}
 
@@ -365,4 +385,32 @@ export class ComicChunkCacheService {
 
 		return progress.bytesProcessed >= lastBytesProcessed + (50 * 1024 * 1024);
 	}
+}
+
+function extractionBuildOutcomeFromManifest(collected: CollectedSourceImages): "complete" | "partial" {
+	const manifestStatus = collected.manifest?.status;
+	return manifestStatus === "partial" ? "partial" : "complete";
+}
+
+function extractionDroppedPagesFromManifest(collected: CollectedSourceImages): number {
+	const manifestDroppedPages = collected.manifest?.droppedPages;
+	return manifestDroppedPages || 0;
+}
+
+function extractionWarningCountFromManifest(collected: CollectedSourceImages): number {
+	const manifestWarningCount = collected.manifest?.warningCount;
+	return manifestWarningCount || 0;
+}
+
+function extractionLastWarningsFromManifest(collected: CollectedSourceImages): string[] | undefined {
+	const manifestWarnings = collected.manifest?.warnings;
+	if (!manifestWarnings?.length) {
+		return undefined;
+	}
+
+	return manifestWarnings
+		.slice(0, 5)
+		.map((warning) => warning.originalName ? `${warning.originalName}: ${warning.message || ""}` : warning.message || "")
+		.filter((warning) => warning.trim().length > 0)
+	;
 }

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <clocale>
 #include <cstdlib>
 #include <csignal>
 #include <cctype>
@@ -14,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -42,6 +44,7 @@ struct CliArgs {
     std::string inputDir;
     std::string output;
     std::string backend = "auto";
+    bool debugArchive = false;
     std::string readerFormat = "jpeg";
     int readerMaxDimension = 2400;
     int readerQuality = 82;
@@ -57,6 +60,12 @@ struct ManifestPage {
     int outputWidth = 0;
     int outputHeight = 0;
     bool bypassed = false;
+};
+
+struct ManifestWarning {
+    int index = 0;
+    std::string originalName;
+    std::string message;
 };
 
 struct WorkerResult {
@@ -129,6 +138,7 @@ void printUsage(const char* program) {
         << " [--reader-max-dimension INT]"
         << " [--reader-quality INT]"
         << " [--vips-concurrency INT]"
+        << " [--debug-archive]"
         << std::endl;
 }
 
@@ -149,6 +159,10 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
         }
         if (arg == "--backend" && index + 1 < argc) {
             args.backend = argv[++index];
+            continue;
+        }
+        if (arg == "--debug-archive") {
+            args.debugArchive = true;
             continue;
         }
         if (arg == "--reader-format" && index + 1 < argc) {
@@ -393,7 +407,10 @@ std::string writeManifest(
     const std::string& source,
     BackendKind backend,
     const ImageConfig& config,
-    const std::vector<ManifestPage>& pages
+    const std::vector<ManifestPage>& pages,
+    const std::vector<ManifestWarning>& warnings,
+    const std::string& status = "complete",
+    int requestedPages = -1
 ) {
     const fs::path manifestPath = outputDir / "manifest.json";
     std::ofstream manifest(manifestPath, std::ios::binary | std::ios::trunc);
@@ -405,13 +422,18 @@ std::string writeManifest(
     manifest << "  \"version\": 1,\n";
     manifest << "  \"source\": \"" << jsonEscape(source) << "\",\n";
     manifest << "  \"backend\": \"" << backendName(backend) << "\",\n";
-    manifest << "  \"status\": \"complete\",\n";
+    manifest << "  \"status\": \"" << jsonEscape(status) << "\",\n";
     manifest << "  \"config\": {\n";
     manifest << "    \"readerMaxDimension\": " << config.readerMaxDimension << ",\n";
     manifest << "    \"readerQuality\": " << config.readerQuality << ",\n";
     manifest << "    \"readerFormat\": \"" << jsonEscape(config.readerFormat) << "\",\n";
     manifest << "    \"vipsConcurrency\": " << config.vipsConcurrency << "\n";
     manifest << "  },\n";
+    if (requestedPages >= 0) {
+        manifest << "  \"requestedPages\": " << requestedPages << ",\n";
+        manifest << "  \"droppedPages\": " << (requestedPages - static_cast<int>(pages.size())) << ",\n";
+    }
+    manifest << "  \"warningCount\": " << warnings.size() << ",\n";
     manifest << "  \"totalPages\": " << pages.size() << ",\n";
     manifest << "  \"pages\": [\n";
 
@@ -428,6 +450,22 @@ std::string writeManifest(
                  << ", \"bypassed\": " << (page.bypassed ? "true" : "false")
                  << "}";
         if (index + 1 < pages.size()) {
+            manifest << ",";
+        }
+        manifest << "\n";
+    }
+
+    manifest << "  ],\n";
+    manifest << "  \"warnings\": [\n";
+
+    for (std::size_t index = 0; index < warnings.size(); index++) {
+        const ManifestWarning& warning = warnings[index];
+        manifest << "    {"
+                 << "\"index\": " << warning.index
+                 << ", \"originalName\": \"" << jsonEscape(warning.originalName) << "\""
+                 << ", \"message\": \"" << jsonEscape(warning.message) << "\""
+                 << "}";
+        if (index + 1 < warnings.size()) {
             manifest << ",";
         }
         manifest << "\n";
@@ -465,28 +503,78 @@ WorkerResult processDirectoryInput(const CliArgs& args, const ImageConfig& confi
         "\"backend\":\"directory\",\"input\":\"" + jsonEscape(args.inputDir) +
         "\",\"output\":\"" + jsonEscape(args.output) + "\"");
 
-    std::vector<ManifestPage> pages(entries.size());
-    std::size_t processedCount = 0;
+    std::vector<std::optional<ManifestPage>> processedPages(entries.size());
+    std::vector<ManifestWarning> manifestWarnings;
     for (std::size_t index = 0; index < entries.size(); index++) {
         if (cancelled) {
             break;
         }
 
         const DirectoryImageEntry& entry = entries[index];
-        const std::vector<uint8_t> data = readFileBytes(entry.sourcePath);
-        pages[index] = processPageToRaw(static_cast<int>(index), entry.entry, data, rawDir, config);
-        processedCount++;
+        try {
+            const std::vector<uint8_t> data = readFileBytes(entry.sourcePath);
+            processedPages[index] = processPageToRaw(static_cast<int>(index), entry.entry, data, rawDir, config);
+        } catch (const std::exception& error) {
+            const std::string message = error.what();
+            manifestWarnings.push_back({
+                static_cast<int>(index),
+                entry.entry.archivePath,
+                message,
+            });
+            std::cerr
+                << "Skipped directory page after read/image-processing failure: "
+                << entry.entry.archivePath
+                << " (" << message << ")"
+                << std::endl;
+            emitEvent(
+                "warning",
+                "\"message\":\"Dropped directory page after read/image-processing failure\","
+                "\"entry\":\"" + jsonEscape(entry.entry.archivePath) + "\","
+                "\"index\":" + std::to_string(index + 1)
+            );
+        }
         emitEvent("extracting",
             "\"current\":" + std::to_string(index + 1) +
             ",\"total\":" + std::to_string(entries.size()) +
             ",\"name\":\"" + jsonEscape(entry.entry.archivePath) + "\"");
     }
 
-    if (cancelled || processedCount != entries.size()) {
+    if (cancelled) {
         throw std::runtime_error("cancelled");
     }
 
-    const std::string manifestPath = writeManifest(outputDir, args.inputDir, BackendKind::Directory, config, pages);
+    std::vector<ManifestPage> pages;
+    pages.reserve(processedPages.size());
+    for (auto& page : processedPages) {
+        if (page.has_value()) {
+            pages.push_back(std::move(page.value()));
+        }
+    }
+
+    if (pages.empty()) {
+        throw std::runtime_error("No usable image entries remained after processing directory");
+    }
+
+    const int droppedPages = static_cast<int>(entries.size() - pages.size());
+    const std::string status = droppedPages > 0 ? "partial" : "complete";
+    if (droppedPages > 0) {
+        emitEvent(
+            "warning",
+            "\"message\":\"Dropped " + std::to_string(droppedPages) +
+            " directory page(s) after read/image-processing failure\""
+        );
+    }
+
+    const std::string manifestPath = writeManifest(
+        outputDir,
+        args.inputDir,
+        BackendKind::Directory,
+        config,
+        pages,
+        manifestWarnings,
+        status,
+        static_cast<int>(entries.size())
+    );
     return {
         static_cast<int>(pages.size()),
         BackendKind::Directory,
@@ -516,14 +604,48 @@ WorkerResult processArchiveInput(const CliArgs& args, const ImageConfig& config)
         "\",\"output\":\"" + jsonEscape(args.output) + "\"");
 
     const fs::path rawDir = fs::path(args.output) / "raw";
-    std::vector<ManifestPage> pages(entries.size());
+    std::vector<std::optional<ManifestPage>> processedPages(entries.size());
+    std::vector<ManifestWarning> manifestWarnings;
     ArchiveCancelContext cancelContext{&cancelled};
 
     archiveBackend->processEntries(
         args.input,
         entries,
         [&](int sortedIndex, const CanonicalArchiveEntry& entry, std::vector<uint8_t>&& data) {
-            pages[sortedIndex] = processPageToRaw(sortedIndex, entry, data, rawDir, config);
+            try {
+                processedPages[sortedIndex] = processPageToRaw(sortedIndex, entry, data, rawDir, config);
+            } catch (const std::exception& error) {
+                const std::string message = error.what();
+                manifestWarnings.push_back({
+                    sortedIndex,
+                    entry.archivePath,
+                    message,
+                });
+                std::cerr
+                    << "Skipped archive page after image-processing failure: "
+                    << entry.archivePath
+                    << " (" << message << ")"
+                    << std::endl;
+                emitEvent(
+                    "warning",
+                    "\"message\":\"Dropped archive page after image-processing failure\","
+                    "\"entry\":\"" + jsonEscape(entry.archivePath) + "\","
+                    "\"index\":" + std::to_string(sortedIndex + 1)
+                );
+            }
+        },
+        [&](int sortedIndex, const CanonicalArchiveEntry& entry, const std::string& message) {
+            manifestWarnings.push_back({
+                sortedIndex,
+                entry.archivePath,
+                message,
+            });
+            emitEvent(
+                "warning",
+                "\"message\":\"Dropped archive page after extraction/read failure\","
+                "\"entry\":\"" + jsonEscape(entry.archivePath) + "\","
+                "\"index\":" + std::to_string(sortedIndex + 1)
+            );
         },
         [](int current, int total, const std::string& name, void*) {
             emitEvent("extracting",
@@ -539,7 +661,37 @@ WorkerResult processArchiveInput(const CliArgs& args, const ImageConfig& config)
         throw std::runtime_error("cancelled");
     }
 
-    const std::string manifestPath = writeManifest(args.output, args.input, backend, config, pages);
+    std::vector<ManifestPage> pages;
+    pages.reserve(processedPages.size());
+    for (auto& page : processedPages) {
+        if (page.has_value()) {
+            pages.push_back(std::move(page.value()));
+        }
+    }
+
+    if (pages.empty()) {
+        throw std::runtime_error("No extractable image entries remained after processing archive");
+    }
+
+    const int droppedPages = static_cast<int>(entries.size() - pages.size());
+    const std::string status = droppedPages > 0 ? "partial" : "complete";
+    if (droppedPages > 0) {
+        emitEvent("warning",
+            "\"message\":\"Dropped " + std::to_string(droppedPages) +
+            " archive page(s) after extraction/processing failure\""
+        );
+    }
+
+    const std::string manifestPath = writeManifest(
+        args.output,
+        args.input,
+        backend,
+        config,
+        pages,
+        manifestWarnings,
+        status,
+        static_cast<int>(entries.size())
+    );
     return {
         static_cast<int>(pages.size()),
         backend,
@@ -556,7 +708,11 @@ int main(int argc, char* argv[]) {
     }
 
     try {
+        if (!std::setlocale(LC_CTYPE, "")) {
+            std::setlocale(LC_CTYPE, "C.UTF-8");
+        }
         validateCliArgs(args);
+        setArchiveDebugEnabled(args.debugArchive);
 
         signal(SIGTERM, signalHandler);
         signal(SIGINT, signalHandler);

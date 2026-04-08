@@ -4,6 +4,7 @@
 #include <cctype>
 #include <codecvt>
 #include <filesystem>
+#include <iostream>
 #include <locale>
 #include <set>
 #include <string>
@@ -11,6 +12,8 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+
+static bool g_archiveDebugEnabled = false;
 
 static const std::set<std::string> IMAGE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".bmp", ".tiff", ".tif"
@@ -67,6 +70,34 @@ int compareDigitRuns(const std::string& lhs, std::size_t& i, const std::string& 
     return 0;
 }
 
+std::string escapeDebugValue(const std::string& value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const char ch : value) {
+        switch (ch) {
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            case '\t':
+                escaped += "\\t";
+                break;
+            default:
+                escaped.push_back(ch);
+                break;
+        }
+    }
+    return escaped;
+}
+
 }  // namespace
 
 std::string archiveEntryPathUtf8(archive_entry* entry) {
@@ -88,6 +119,29 @@ std::string archiveEntryPathUtf8(archive_entry* entry) {
         return normalizeArchivePath(raw);
     }
     return "";
+}
+
+std::string describeArchiveEntryPath(archive_entry* entry) {
+    std::string rawWide = "<null>";
+    if (entry) {
+        if (const wchar_t* wide = archive_entry_pathname_w(entry)) {
+            try {
+                std::wstring_convert<std::codecvt_utf8<wchar_t>> convert;
+                rawWide = convert.to_bytes(wide);
+            } catch (...) {
+                rawWide = "<wide-convert-error>";
+            }
+        }
+    }
+
+    const char* utf8 = entry ? archive_entry_pathname_utf8(entry) : nullptr;
+    const char* raw = entry ? archive_entry_pathname(entry) : nullptr;
+    const std::string normalized = archiveEntryPathUtf8(entry);
+
+    return "{rawWide=\"" + escapeDebugValue(rawWide) +
+        "\", rawUtf8=\"" + escapeDebugValue(utf8 ? std::string(utf8) : "<null>") +
+        "\", rawNative=\"" + escapeDebugValue(raw ? std::string(raw) : "<null>") +
+        "\", normalized=\"" + escapeDebugValue(normalized) + "\"}";
 }
 
 std::string normalizeArchivePath(std::string path) {
@@ -190,4 +244,39 @@ std::vector<CanonicalArchiveEntry> sortEntries(std::vector<CanonicalArchiveEntry
     });
 
     return input;
+}
+
+void setArchiveDebugEnabled(bool enabled) {
+    g_archiveDebugEnabled = enabled;
+}
+
+bool archiveDebugEnabled() {
+    return g_archiveDebugEnabled;
+}
+
+void archiveDebugLog(const std::string& message) {
+    if (!g_archiveDebugEnabled) {
+        return;
+    }
+    std::cerr << "[archive-debug] " << message << std::endl;
+}
+
+std::string archiveDebugJoinSamples(const std::vector<std::string>& values, std::size_t limit) {
+    if (values.empty()) {
+        return "[]";
+    }
+
+    std::string output = "[";
+    const std::size_t count = std::min(values.size(), limit);
+    for (std::size_t index = 0; index < count; index++) {
+        if (index > 0) {
+            output += ", ";
+        }
+        output += values[index];
+    }
+    if (values.size() > limit) {
+        output += ", ...";
+    }
+    output += "]";
+    return output;
 }

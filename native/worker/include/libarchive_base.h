@@ -21,6 +21,7 @@ public:
     int processEntries(const std::string& archivePath,
                        const std::vector<CanonicalArchiveEntry>& entries,
                        const EntryProcessor& processor,
+                       const WarningCb& warningCb,
                        ProgressCb progressCb,
                        void* userData) override;
     void close() override;

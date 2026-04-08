@@ -43,7 +43,7 @@ describe("ComicChunkCacheService", () => {
 
 	async function createWorkerExtractionFixture(
 		rawNames: string[],
-		options?: { status?: string; totalPages?: number }
+		options?: { status?: "complete" | "partial"; totalPages?: number }
 	) {
 		const workerTempDir = await fs.mkdtemp(path.join(tempDir, "worker-extract-"));
 		const rawDir = path.join(workerTempDir, "raw");
@@ -68,7 +68,7 @@ describe("ComicChunkCacheService", () => {
 
 		const manifest = {
 			version: 1,
-			status: options?.status || "complete",
+			status: options?.status ?? "complete",
 			totalPages: options?.totalPages ?? pages.length,
 			pages
 		};

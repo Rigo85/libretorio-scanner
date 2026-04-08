@@ -171,6 +171,27 @@ export class FileRepository {
 		}
 	}
 
+	async getAllCoverIds(): Promise<string[] | undefined> {
+		logger.info("getAllCoverIds.");
+
+		try {
+			const query = `
+                SELECT DISTINCT "coverId"
+                FROM archive
+                WHERE "coverId" IS NOT NULL
+			`;
+
+			const rows = await PostgresAdapter.getInstance().query(query, []) as Array<{ coverId?: string }> | undefined;
+			return (rows || [])
+				.map((row: { coverId?: string }) => row.coverId)
+				.filter((coverId: string | undefined): coverId is string => Boolean(coverId))
+			;
+		} catch (error) {
+			logger.error("getAllCoverIds:", error.message);
+			return undefined;
+		}
+	}
+
 	async getFileByHashes(scanRootId: number, hashes: string[]): Promise<File[]> {
 		logger.info(`getFileByHashes for scan root="${scanRootId}" hashes="${hashes.length}".`);
 

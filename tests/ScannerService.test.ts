@@ -1,5 +1,9 @@
+import fs from "fs-extra";
+import os from "os";
+import path from "path";
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 
+import { config } from "(src)/config/configuration";
 import { FileKind } from "(src)/models/interfaces/File";
 import { FileRepository } from "(src)/repositories/FileRepository";
 import { ScanRootRepository } from "(src)/repositories/ScanRootRepository";
@@ -10,13 +14,20 @@ import * as comicCacheUtils from "(src)/utils/comicCacheUtils";
 
 describe("ScannerService orchestration", () => {
 	let scanner: ScannerService;
+	let originalCachePath: string;
+	const tempCacheRoots: string[] = [];
 
 	beforeEach(() => {
 		scanner = ScannerService.getInstance();
+		originalCachePath = config.production.paths.cache;
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
+		config.production.paths.cache = originalCachePath;
 		jest.restoreAllMocks();
+		while (tempCacheRoots.length) {
+			await fs.rm(tempCacheRoots.pop()!, {recursive: true, force: true});
+		}
 	});
 
 	it("logs cache candidate resolution progress when there are no new files", async () => {
@@ -48,6 +59,7 @@ describe("ScannerService orchestration", () => {
 		});
 		jest.spyOn(FileRepository.getInstance(), "removeFileByParentHash").mockResolvedValue(0);
 		jest.spyOn(FileRepository.getInstance(), "getFilesForCacheBuild").mockResolvedValue([existingComicFile]);
+		jest.spyOn(FileRepository.getInstance(), "getAllCoverIds").mockResolvedValue(["cover-backlog"]);
 		jest.spyOn(FileRepository.getInstance(), "removeFileByFileHash").mockResolvedValue(0);
 		jest.spyOn(ScanRootRepository.getInstance(), "updateScanRoot").mockResolvedValue(undefined as never);
 		jest.spyOn(SpecialDirectoryArtifactService.getInstance(), "ensureArtifactsForFiles").mockResolvedValue([]);
@@ -100,6 +112,7 @@ describe("ScannerService orchestration", () => {
 
 		jest.spyOn(FileRepository.getInstance(), "removeFileByParentHash").mockResolvedValue(0);
 		jest.spyOn(FileRepository.getInstance(), "getFilesForCacheBuild").mockResolvedValue([]);
+		jest.spyOn(FileRepository.getInstance(), "getAllCoverIds").mockResolvedValue(["cover-comic"]);
 		jest.spyOn(FileRepository.getInstance(), "removeFileByFileHash").mockResolvedValue(0);
 		const insertSpy = jest.spyOn(FileRepository.getInstance(), "insertFile").mockResolvedValue(101);
 		jest.spyOn(ScanRootRepository.getInstance(), "updateScanRoot").mockResolvedValue(undefined as never);
@@ -188,6 +201,7 @@ describe("ScannerService orchestration", () => {
 
 		jest.spyOn(FileRepository.getInstance(), "removeFileByParentHash").mockResolvedValue(0);
 		jest.spyOn(FileRepository.getInstance(), "getFilesForCacheBuild").mockResolvedValue([epubFile, audioFile, comicDir]);
+		jest.spyOn(FileRepository.getInstance(), "getAllCoverIds").mockResolvedValue(["cover-epub", "cover-audio", "cover-comic-dir"]);
 		jest.spyOn(FileRepository.getInstance(), "removeFileByFileHash").mockResolvedValue(0);
 		jest.spyOn(ScanRootRepository.getInstance(), "updateScanRoot").mockResolvedValue(undefined as never);
 
@@ -228,5 +242,30 @@ describe("ScannerService orchestration", () => {
 			sourceType: "directory",
 			requiresZipArtifact: true
 		}));
+	});
+
+	it("removes orphan cache directories while preserving live coverIds and the staging root", async () => {
+		const cacheRoot = await fs.mkdtemp(path.join(os.tmpdir(), "libretorio-cache-gc-"));
+		tempCacheRoots.push(cacheRoot);
+		config.production.paths.cache = cacheRoot;
+		await fs.ensureDir(path.join(cacheRoot, ".scanner-build"));
+		await fs.ensureDir(path.join(cacheRoot, "cover-live"));
+		await fs.writeFile(path.join(cacheRoot, "cover-live", "_scanner_state.json"), "{}");
+		await fs.ensureDir(path.join(cacheRoot, "cover-orphan"));
+		await fs.writeFile(path.join(cacheRoot, "cover-orphan", "stale.cache"), "stale");
+
+		jest.spyOn(FileRepository.getInstance(), "getAllCoverIds").mockResolvedValue(["cover-live"]);
+
+		const summary = await (scanner as any).runCacheGarbageCollection();
+
+		expect(summary).toEqual(expect.objectContaining({
+			cacheDirsTotal: 2,
+			liveCoverIds: 1,
+			candidates: 1,
+			removed: 1
+		}));
+		await expect(fs.pathExists(path.join(cacheRoot, "cover-live"))).resolves.toBe(true);
+		await expect(fs.pathExists(path.join(cacheRoot, ".scanner-build"))).resolves.toBe(true);
+		await expect(fs.pathExists(path.join(cacheRoot, "cover-orphan"))).resolves.toBe(false);
 	});
 });

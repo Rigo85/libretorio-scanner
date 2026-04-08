@@ -138,10 +138,13 @@ El flujo de cache actual implementa:
 
 - staging en `cache/.scanner-build/`
 - limpieza de staging residual al inicio de cada corrida
+- garbage collection final de directorios de cache huérfanos contra la lista viva de `coverId` en DB
 - validación de cache existente antes de hacer `skip`
 - promoción atómica a `cache/<coverId>/`
 - preservación del cache final previo si un rebuild falla
 - estado por item en `_scanner_state.json`
+- estado `ready` reutilizable con `buildOutcome="complete|partial"`
+- tolerancia a páginas individuales dañadas; si al menos una página válida sobrevive, la cache queda `ready` con `buildOutcome="partial"`
 
 El estado por item también se reutiliza para:
 

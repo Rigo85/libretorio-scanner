@@ -22,11 +22,20 @@ interface NativeWorkerManifestPage {
 	bypassed?: boolean;
 }
 
+interface NativeWorkerManifestWarning {
+	index: number;
+	originalName: string;
+	message: string;
+}
+
 interface NativeWorkerManifest {
 	version?: number;
 	source?: string;
 	backend?: string;
-	status?: string;
+	status?: "complete" | "partial";
+	requestedPages?: number;
+	droppedPages?: number;
+	warningCount?: number;
 	totalPages?: number;
 	config?: {
 		readerFormat?: "jpeg" | "webp";
@@ -35,6 +44,7 @@ interface NativeWorkerManifest {
 		vipsConcurrency?: number;
 	};
 	pages?: NativeWorkerManifestPage[];
+	warnings?: NativeWorkerManifestWarning[];
 }
 
 interface NativeWorkerExtractResult {
@@ -57,6 +67,8 @@ interface WorkerEvent {
 	output?: string;
 	manifestPath?: string;
 	message?: string;
+	entry?: string;
+	index?: number;
 	requested?: string;
 	detected?: string;
 }
@@ -197,6 +209,8 @@ export class NativeComicCacheWorkerService {
 			let manifestPath: string | undefined = undefined;
 			let manifest: NativeWorkerManifest | undefined = undefined;
 			let progressLogStep = 0;
+			const workerErrorMessages: string[] = [];
+			const stderrLines: string[] = [];
 			const inputFilePath = this.readCliValue(args, "--input");
 			const inputDirPath = this.readCliValue(args, "--input-dir");
 			const isDirectorySource = Boolean(inputDirPath);
@@ -224,7 +238,7 @@ export class NativeComicCacheWorkerService {
 
 				if (event.type === "warning") {
 					logger.info(
-						`worker-warning coverId="${coverId}" message="${event.message || ""}" requested="${event.requested || ""}" detected="${event.detected || ""}".`
+						`worker-warning coverId="${coverId}" message="${event.message || ""}" entry="${event.entry || ""}" index="${event.index || ""}" requested="${event.requested || ""}" detected="${event.detected || ""}".`
 					);
 					return;
 				}
@@ -248,17 +262,23 @@ export class NativeComicCacheWorkerService {
 					manifest = manifestPath ? this.readManifest(manifestPath) : undefined;
 					if (isDirectorySource) {
 						logger.info(
-							`worker-complete coverId="${coverId}" sourceType="directory" pages="${totalPages || 0}" manifest="${manifestPath || ""}".`
+							`worker-complete coverId="${coverId}" sourceType="directory" outcome="${manifest?.status || "complete"}" droppedPages="${manifest?.droppedPages || 0}" warnings="${manifest?.warningCount || 0}" pages="${totalPages || 0}" manifest="${manifestPath || ""}".`
 						);
 					} else {
 						logger.info(
-							`worker-complete coverId="${coverId}" backend="${detectedBackend}" pages="${totalPages || 0}" manifest="${manifestPath || ""}".`
+							`worker-complete coverId="${coverId}" backend="${detectedBackend}" outcome="${manifest?.status || "complete"}" droppedPages="${manifest?.droppedPages || 0}" warnings="${manifest?.warningCount || 0}" pages="${totalPages || 0}" manifest="${manifestPath || ""}".`
 						);
 					}
 					return;
 				}
 
 				if (event.type === "error") {
+					if (event.message) {
+						workerErrorMessages.push(event.message);
+						if (workerErrorMessages.length > 5) {
+							workerErrorMessages.shift();
+						}
+					}
 					logger.error(`worker-error coverId="${coverId}" input="${inputPath}" message="${event.message || "unknown"}".`);
 				}
 			});
@@ -266,10 +286,20 @@ export class NativeComicCacheWorkerService {
 			this.attachLineReader(proc.stderr, (line) => {
 				const event = this.parseWorkerEvent(line);
 				if (event?.type === "error") {
+					if (event.message) {
+						workerErrorMessages.push(event.message);
+						if (workerErrorMessages.length > 5) {
+							workerErrorMessages.shift();
+						}
+					}
 					logger.error(`worker-stderr-error coverId="${coverId}" input="${inputPath}" message="${event.message || "unknown"}".`);
 					return;
 				}
 
+				stderrLines.push(line);
+				if (stderrLines.length > 10) {
+					stderrLines.shift();
+				}
 				logger.info(`worker stderr coverId="${coverId}": ${line}`);
 			});
 
@@ -280,7 +310,10 @@ export class NativeComicCacheWorkerService {
 				} else if (code === 0) {
 					resolve({totalPages, detectedBackend: backend, manifestPath, manifest});
 				} else {
-					reject(new Error(`worker exited with code ${code}`));
+					const detail = workerErrorMessages[workerErrorMessages.length - 1] ||
+						(stderrLines.length ? stderrLines.slice(-3).join(" | ") : undefined)
+					;
+					reject(new Error(detail ? `worker exited with code ${code}: ${detail}` : `worker exited with code ${code}`));
 				}
 			});
 		});

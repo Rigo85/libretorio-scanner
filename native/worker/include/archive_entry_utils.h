@@ -13,6 +13,7 @@ struct CanonicalArchiveEntry {
 };
 
 std::string archiveEntryPathUtf8(archive_entry* entry);
+std::string describeArchiveEntryPath(archive_entry* entry);
 std::string normalizeArchivePath(std::string path);
 std::string archiveBasename(const std::string& path);
 std::string archiveExtension(const std::string& path);
@@ -20,3 +21,8 @@ bool isJunkArchiveEntry(const std::string& path);
 bool isImageArchiveEntry(const std::string& path);
 bool naturalArchivePathLess(const std::string& lhs, const std::string& rhs);
 std::vector<CanonicalArchiveEntry> sortEntries(std::vector<CanonicalArchiveEntry>&& input);
+
+void setArchiveDebugEnabled(bool enabled);
+bool archiveDebugEnabled();
+void archiveDebugLog(const std::string& message);
+std::string archiveDebugJoinSamples(const std::vector<std::string>& values, std::size_t limit = 5);

@@ -3,6 +3,7 @@ import { ComicArchiveFormat, ComicSourceType } from "(src)/models/interfaces/Eli
 export interface ComicCacheState {
 	version: 1;
 	status: "building" | "ready" | "error";
+	buildOutcome?: "complete" | "partial";
 	sourcePath: string;
 	sourceType: ComicSourceType;
 	archiveFormat?: ComicArchiveFormat;
@@ -13,5 +14,8 @@ export interface ComicCacheState {
 	totalPages: number;
 	zipReady: boolean;
 	chunksReady: boolean;
+	droppedPages?: number;
+	warningCount?: number;
+	lastWarnings?: string[];
 	lastError?: string;
 }
