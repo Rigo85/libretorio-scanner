@@ -18,12 +18,14 @@ import {
 import { ScanResult } from "(src)/models/interfaces/ScanResult";
 import { Directory } from "(src)/models/interfaces/Directory";
 import { File, FileKind } from "(src)/models/interfaces/File";
+import { CacheArtifactSnapshotSummary } from "(src)/models/interfaces/CacheArtifactSnapshot";
 import { EligibleComicSource } from "(src)/models/interfaces/EligibleComicSource";
 import { ScanRootRepository } from "(src)/repositories/ScanRootRepository";
 import { FileRepository } from "(src)/repositories/FileRepository";
 import { CalibreService } from "(src)/services/CalibreService";
 import { ComicChunkCacheService } from "(src)/services/ComicChunkCacheService";
 import { OpenLibraryService } from "(src)/services/OpenLibraryService";
+import { CacheArtifactSnapshotService } from "(src)/services/CacheArtifactSnapshotService";
 import { SpecialDirectoryArtifactService } from "(src)/services/SpecialDirectoryArtifactService";
 import { config } from "(src)/config/configuration";
 import { cleanupCacheBuildRoot } from "(src)/utils/comicCacheUtils";
@@ -267,11 +269,15 @@ export class ScannerService {
 
 			await ScanRootRepository.getInstance().updateScanRoot(JSON.stringify(scanRootResult.scan.directories), scanRoot.id);
 			const cacheGcSummary = await this.runCacheGarbageCollection();
+			const cacheArtifactSnapshotSummary: CacheArtifactSnapshotSummary =
+				await CacheArtifactSnapshotService.getInstance().rebuildSnapshotFromCache();
 			logger.info(
 				`scanCompareUpdate summary scanRoot="${scanRootPath}" newFiles="${newFiles.length}" inserted="${insertedNewFiles.length}" ` +
 				`specialZipReady="${specialArtifactReadyCount}" specialZipSkipped="${specialArtifactSkippedCount}" specialZipError="${specialArtifactErrorCount}" ` +
 				`eligible="${eligibleCount}" readyReused="${readyReusedCount}" buildCandidates="${eligibleSources.length}" cacheReady="${readyCount}" cacheSkipped="${skippedCount}" cacheError="${errorCount}" ` +
 				`cacheGcCandidates="${cacheGcSummary.candidates}" cacheGcRemoved="${cacheGcSummary.removed}" cacheGcBytesFreed="${humanFileSize(cacheGcSummary.bytesFreed, true)}" ` +
+				`cacheSnapshotRows="${cacheArtifactSnapshotSummary.rows}" cacheSnapshotReaderReady="${cacheArtifactSnapshotSummary.readerReady}" cacheSnapshotPartial="${cacheArtifactSnapshotSummary.partialReady}" ` +
+				`cacheSnapshotError="${cacheArtifactSnapshotSummary.errorStates}" cacheSnapshotZipOnly="${cacheArtifactSnapshotSummary.zipOnly}" cacheSnapshotLegacy="${cacheArtifactSnapshotSummary.legacyReaderReady}" cacheSnapshotPublished="${cacheArtifactSnapshotSummary.published}" ` +
 				`removedByParentHash="${removedFilesCount}" removedByFileHash="${removedByFileHashCount}" ` +
 				`metadataCompleted="${metadataCompleted}" insertFailed="${insertFailed}" ` +
 				`firstInsertMs="${firstInsertElapsedMs ?? -1}" totalMs="${Date.now() - scanStartedAt}".`

@@ -7,6 +7,7 @@ import { config } from "(src)/config/configuration";
 import { FileKind } from "(src)/models/interfaces/File";
 import { FileRepository } from "(src)/repositories/FileRepository";
 import { ScanRootRepository } from "(src)/repositories/ScanRootRepository";
+import { CacheArtifactSnapshotService } from "(src)/services/CacheArtifactSnapshotService";
 import { ComicChunkCacheService } from "(src)/services/ComicChunkCacheService";
 import { ScannerService } from "(src)/services/ScannerService";
 import { SpecialDirectoryArtifactService } from "(src)/services/SpecialDirectoryArtifactService";
@@ -20,6 +21,17 @@ describe("ScannerService orchestration", () => {
 	beforeEach(() => {
 		scanner = ScannerService.getInstance();
 		originalCachePath = config.production.paths.cache;
+		jest.spyOn(CacheArtifactSnapshotService.getInstance(), "rebuildSnapshotFromCache").mockResolvedValue({
+			totalCacheDirs: 0,
+			rows: 0,
+			readerReady: 0,
+			partialReady: 0,
+			errorStates: 0,
+			zipOnly: 0,
+			legacyReaderReady: 0,
+			published: true,
+			elapsedMs: 0
+		});
 	});
 
 	afterEach(async () => {
@@ -332,5 +344,63 @@ describe("ScannerService orchestration", () => {
 		await expect(fs.pathExists(path.join(cacheRoot, "cover-live"))).resolves.toBe(true);
 		await expect(fs.pathExists(path.join(cacheRoot, ".scanner-build"))).resolves.toBe(true);
 		await expect(fs.pathExists(path.join(cacheRoot, "cover-orphan"))).resolves.toBe(false);
+	});
+
+	it("includes cache artifact snapshot metrics in the final summary", async () => {
+		const existingComicFile = {
+			id: 45,
+			name: "summary.cbz",
+			parentPath: "/library",
+			parentHash: "parent-summary",
+			fileHash: "hash-summary",
+			size: "10 MB",
+			coverId: "cover-summary",
+			fileKind: FileKind.FILE
+		};
+		const consoleSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+
+		jest.spyOn(CacheArtifactSnapshotService.getInstance(), "rebuildSnapshotFromCache").mockResolvedValue({
+			totalCacheDirs: 5,
+			rows: 5,
+			readerReady: 4,
+			partialReady: 1,
+			errorStates: 1,
+			zipOnly: 1,
+			legacyReaderReady: 1,
+			published: true,
+			elapsedMs: 12
+		});
+		jest.spyOn(ScanRootRepository.getInstance(), "getScanRootByPath")
+			.mockResolvedValue({id: 15, path: "/library"} as never);
+		jest.spyOn(comicCacheUtils, "cleanupCacheBuildRoot").mockResolvedValue(0);
+		jest.spyOn(scanner, "scan").mockResolvedValue({
+			root: "/library",
+			scan: {
+				directories: {
+					name: "library",
+					hash: "root-hash",
+					directories: []
+				},
+				files: [existingComicFile]
+			}
+		});
+		jest.spyOn(FileRepository.getInstance(), "removeFileByParentHash").mockResolvedValue(0);
+		jest.spyOn(FileRepository.getInstance(), "getFilesForCacheBuild").mockResolvedValue([existingComicFile]);
+		jest.spyOn(FileRepository.getInstance(), "getAllCoverIds").mockResolvedValue(["cover-summary"]);
+		jest.spyOn(FileRepository.getInstance(), "removeFileByFileHash").mockResolvedValue(0);
+		jest.spyOn(ScanRootRepository.getInstance(), "updateScanRoot").mockResolvedValue(undefined as never);
+		jest.spyOn(SpecialDirectoryArtifactService.getInstance(), "ensureArtifactsForFiles").mockResolvedValue([]);
+		jest.spyOn(ComicChunkCacheService.getInstance(), "ensureCacheForSources").mockResolvedValue([]);
+
+		await scanner.scanCompareUpdate("/library");
+
+		const joinedLogs = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+		expect(joinedLogs).toContain("cacheSnapshotRows=\"5\"");
+		expect(joinedLogs).toContain("cacheSnapshotReaderReady=\"4\"");
+		expect(joinedLogs).toContain("cacheSnapshotPartial=\"1\"");
+		expect(joinedLogs).toContain("cacheSnapshotError=\"1\"");
+		expect(joinedLogs).toContain("cacheSnapshotZipOnly=\"1\"");
+		expect(joinedLogs).toContain("cacheSnapshotLegacy=\"1\"");
+		expect(joinedLogs).toContain("cacheSnapshotPublished=\"true\"");
 	});
 });
