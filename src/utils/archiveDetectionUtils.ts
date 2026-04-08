@@ -180,11 +180,48 @@ function detectComicArchiveFormat(filePath: string, fileName: string): ComicArch
 		return detectedByMagic;
 	}
 
+	const declaredBackend = hasDirectComicExtension(fileName)
+		? detectArchiveFormatByExtension(fileName)
+		: undefined;
+
 	if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-		return hasDirectComicExtension(fileName) ? detectArchiveFormatByExtension(fileName) : undefined;
+		return declaredBackend;
+	}
+
+	if (declaredBackend === "rar" && hasWrappedRarSignature(filePath)) {
+		logger.info(
+			`Comic archive magic fallback declaredExtension="${path.extname(fileName || "").toLowerCase()}" backend="rar" path="${filePath}".`
+		);
+		return declaredBackend;
 	}
 
 	return undefined;
+}
+
+function hasWrappedRarSignature(filePath: string): boolean {
+	try {
+		const fd = fs.openSync(filePath, "r");
+		try {
+			const header = Buffer.alloc(4096);
+			const bytesRead = fs.readSync(fd, header, 0, header.length, 0);
+			if (bytesRead < 2) {
+				return false;
+			}
+
+			if (header[0] === 0x4d && header[1] === 0x5a) {
+				return true;
+			}
+
+			const rar4 = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]);
+			const rar5 = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00]);
+			return header.subarray(0, bytesRead).includes(rar4) || header.subarray(0, bytesRead).includes(rar5);
+		} finally {
+			fs.closeSync(fd);
+		}
+	} catch (error) {
+		logger.error(`hasWrappedRarSignature "${filePath}":`, error);
+		return false;
+	}
 }
 
 function detectArchiveFormatByMagic(filePath: string): ComicArchiveFormat | undefined {

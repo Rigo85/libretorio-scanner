@@ -115,6 +115,64 @@ describe("archiveDetectionUtils", () => {
 		expect(state.lastError).toContain("Declared comic extension does not match");
 	});
 
+	it("accepts cbr files with a wrapped rar signature after a leading preamble", async () => {
+		const filePath = path.join(tempDir, "issue.cbr");
+		await fs.writeFile(
+			filePath,
+			Buffer.concat([
+				Buffer.from("Content-Type: application/octet-stream\r\n\r\n"),
+				Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00])
+			])
+		);
+
+		const resolution = await resolveEligibleComicSource({
+			id: 1021,
+			name: "issue.cbr",
+			parentPath: tempDir,
+			parentHash: "parent",
+			fileHash: "hash-wrapped-rar",
+			size: "1 KB",
+			coverId: "cover-wrapped-rar",
+			fileKind: FileKind.FILE
+		});
+
+		expect(resolution.result).toBe("eligible");
+		expect(resolution.reason).toBe("direct-comic-extension");
+		expect(resolution.source).toEqual(expect.objectContaining({
+			sourceType: "archive-file",
+			archiveFormat: "rar"
+		}));
+	});
+
+	it("accepts cbr self-extracting rar archives by extension fallback", async () => {
+		const filePath = path.join(tempDir, "issue.cbr");
+		await fs.writeFile(
+			filePath,
+			Buffer.concat([
+				Buffer.from([0x4d, 0x5a]),
+				Buffer.alloc(64, 0)
+			])
+		);
+
+		const resolution = await resolveEligibleComicSource({
+			id: 1022,
+			name: "issue.cbr",
+			parentPath: tempDir,
+			parentHash: "parent",
+			fileHash: "hash-sfx-rar",
+			size: "1 KB",
+			coverId: "cover-sfx-rar",
+			fileKind: FileKind.FILE
+		});
+
+		expect(resolution.result).toBe("eligible");
+		expect(resolution.reason).toBe("direct-comic-extension");
+		expect(resolution.source).toEqual(expect.objectContaining({
+			sourceType: "archive-file",
+			archiveFormat: "rar"
+		}));
+	});
+
 	it("uses the backend detected by magic bytes for declared comic extensions", async () => {
 		const filePath = path.join(tempDir, "issue.cbz");
 		await fs.writeFile(filePath, Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]));
