@@ -13,6 +13,7 @@ import { Logger } from "(src)/helpers/Logger";
 import { bootstrap } from "(src)/app";
 import { PostgresAdapter } from "(src)/db/PostgresAdapter";
 import { config } from "(src)/config/configuration";
+import { ScannerCacheService } from "(src)/services/ScannerCacheService";
 
 async function fullServerStart() {
 	const app = await bootstrap();
@@ -33,6 +34,8 @@ async function fullServerStart() {
 		}, 10000);
 
 		try {
+			await ScannerCacheService.getInstance().shutdown();
+
 			const dbService = PostgresAdapter.getInstance();
 			await dbService.disconnect();
 

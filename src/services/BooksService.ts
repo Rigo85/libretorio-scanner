@@ -22,20 +22,18 @@ export class BooksService {
 	public async cronUpdateBooksInfo() {
 		logger.info("Cron updating books info");
 
-		const isRunning = await ScannerCacheService.getInstance().isRunning();
-		if (isRunning) {
+		const acquired = await ScannerCacheService.getInstance().tryAcquireLease();
+		if (!acquired) {
 			logger.info("Scanner is already running.");
 			return;
 		}
 
 		const dbScanRoots = await ScanRootRepository.getInstance().getScanRoots();
 		if (!dbScanRoots.length) {
+			await ScannerCacheService.getInstance().releaseLease();
 			logger.error("No scan roots found.");
 			return;
 		}
-
-		await ScannerCacheService.getInstance().setRunning(true);
-		await ScannerCacheService.getInstance().startHeartbeat();
 
 		try {
 			await ScannerService.getInstance().scanCompareUpdate(dbScanRoots[0].path);
@@ -43,8 +41,7 @@ export class BooksService {
 		} catch (error) {
 			logger.error("cronUpdateBooksInfo:", error);
 		} finally {
-			await ScannerCacheService.getInstance().stopHeartbeat();
-			await ScannerCacheService.getInstance().setRunning(false);
+			await ScannerCacheService.getInstance().releaseLease();
 		}
 	}
 }
