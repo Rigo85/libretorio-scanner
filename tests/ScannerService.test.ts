@@ -77,8 +77,8 @@ describe("ScannerService orchestration", () => {
 		expect(joinedLogs).toContain("Phase 1 complete completed=\"0/0\" metadataCompleted=\"0\" inserted=\"0\" failed=\"0\".");
 		expect(joinedLogs).toContain("Preparing cache candidate inputs scanFiles=\"1\" existingDbFiles=\"1\" newInsertedFiles=\"0\".");
 		expect(joinedLogs).toContain("Resolving comic cache candidates scope=\"existing\" total=\"1\".");
-		expect(joinedLogs).toContain("Candidate resolution progress scope=\"existing\" completed=\"1/1\" eligible=\"1\" skipped=\"0\" result=\"eligible\" reason=\"direct-comic-extension\" path=\"/library/backlog.cbz\".");
-		expect(joinedLogs).toContain("Candidate resolution complete scope=\"existing\" total=\"1\" eligible=\"1\" skipped=\"0\"");
+		expect(joinedLogs).toContain("Candidate resolution progress scope=\"existing\" completed=\"1/1\" eligible=\"1\" readyReused=\"0\" buildCandidates=\"1\" skipped=\"0\" result=\"eligible\" reason=\"direct-comic-extension\" path=\"/library/backlog.cbz\".");
+		expect(joinedLogs).toContain("Candidate resolution complete scope=\"existing\" total=\"1\" eligible=\"1\" readyReused=\"0\" buildCandidates=\"1\" skipped=\"0\"");
 		expect(joinedLogs).toContain("Resolving comic cache candidates scope=\"new\" total=\"0\".");
 		expect(joinedLogs).toContain("Resolving ZIP-only special directories scope=\"existing\" total=\"1\".");
 		expect(joinedLogs).toContain("ZIP-only classification progress scope=\"existing\" completed=\"1/1\" selected=\"0\" skipped=\"1\" path=\"/library/backlog.cbz\".");
@@ -150,6 +150,71 @@ describe("ScannerService orchestration", () => {
 			sourceType: "archive-file",
 			archiveFormat: "zip"
 		}));
+	});
+
+	it("reuses ready-state caches without sending them to Phase 3", async () => {
+		const readyComicFile = {
+			id: 31,
+			name: "ready.cbz",
+			parentPath: "/library/comics",
+			parentHash: "parent-ready",
+			fileHash: "hash-ready",
+			size: "10 MB",
+			coverId: "cover-ready",
+			fileKind: FileKind.FILE
+		};
+		const statePath = comicCacheUtils.getStatePath("cover-ready");
+		await fs.ensureDir(path.dirname(statePath));
+		await fs.writeJson(statePath, {
+			version: 1,
+			status: "ready",
+			sourcePath: "/library/comics/ready.cbz",
+			sourceType: "archive-file",
+			archiveFormat: "zip",
+			fileHash: "hash-ready",
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			chunkCount: 2,
+			totalPages: 20,
+			zipReady: false,
+			chunksReady: true
+		});
+		await fs.writeFile(comicCacheUtils.getChunkPath("cover-ready", 0), "{\"index\":0}");
+		await fs.writeFile(comicCacheUtils.getChunkPath("cover-ready", 1), "{\"index\":1}");
+
+		const consoleSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+
+		jest.spyOn(ScanRootRepository.getInstance(), "getScanRootByPath")
+			.mockResolvedValue({id: 7, path: "/library"} as never);
+		jest.spyOn(comicCacheUtils, "cleanupCacheBuildRoot").mockResolvedValue(0);
+		jest.spyOn(scanner, "scan").mockResolvedValue({
+			root: "/library",
+			scan: {
+				directories: {
+					name: "library",
+					hash: "root-hash",
+					directories: []
+				},
+				files: [readyComicFile]
+			}
+		});
+		jest.spyOn(FileRepository.getInstance(), "removeFileByParentHash").mockResolvedValue(0);
+		jest.spyOn(FileRepository.getInstance(), "getFilesForCacheBuild").mockResolvedValue([readyComicFile]);
+		jest.spyOn(FileRepository.getInstance(), "getAllCoverIds").mockResolvedValue(["cover-ready"]);
+		jest.spyOn(FileRepository.getInstance(), "removeFileByFileHash").mockResolvedValue(0);
+		jest.spyOn(ScanRootRepository.getInstance(), "updateScanRoot").mockResolvedValue(undefined as never);
+		jest.spyOn(SpecialDirectoryArtifactService.getInstance(), "ensureArtifactsForFiles").mockResolvedValue([]);
+		const comicCacheSpy = jest.spyOn(ComicChunkCacheService.getInstance(), "ensureCacheForSources").mockResolvedValue([]);
+
+		await scanner.scanCompareUpdate("/library");
+
+		expect(comicCacheSpy).not.toHaveBeenCalled();
+
+		const joinedLogs = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+		expect(joinedLogs).toContain("Candidate resolution progress scope=\"existing\" completed=\"1/1\" eligible=\"1\" readyReused=\"1\" buildCandidates=\"0\" skipped=\"0\" result=\"eligible\" reason=\"ready-state\" path=\"/library/comics/ready.cbz\".");
+		expect(joinedLogs).toContain("Phase 3 — cache build candidates total=\"0\" existing=\"0\" new=\"0\" readyReused=\"1\".");
+		expect(joinedLogs).toContain("scanCompareUpdate summary scanRoot=\"/library\"");
+		expect(joinedLogs).toContain("eligible=\"1\" readyReused=\"1\" buildCandidates=\"0\"");
 	});
 
 	it("routes EPUB and AUDIOBOOK special directories to zip artifacts and excludes them from comic chunk cache", async () => {

@@ -51,6 +51,12 @@ interface CacheGarbageCollectionSummary {
 	bytesFreed: number;
 }
 
+interface EligibleComicSourceResolutionSummary {
+	buildSources: EligibleComicSource[];
+	eligibleCount: number;
+	reusedReadyCount: number;
+}
+
 export class ScannerService {
 	private static instance: ScannerService;
 	private static readonly candidateProgressSmallBatch = 10;
@@ -203,8 +209,8 @@ export class ScannerService {
 			logger.info(
 				`Cache candidate inputs ready existing="${existingDbBackedFiles.length}" new="${insertedNewFiles.length}" elapsedMs="${Date.now() - candidatePreparationStartedAt}".`
 			);
-			const existingEligibleSources = await this.resolveEligibleComicSources(existingDbBackedFiles, "existing");
-			const newEligibleSources = await this.resolveEligibleComicSources(insertedNewFiles, "new");
+			const existingEligibleSummary = await this.resolveEligibleComicSources(existingDbBackedFiles, "existing");
+			const newEligibleSummary = await this.resolveEligibleComicSources(insertedNewFiles, "new");
 
 			const zipOnlyClassificationStartedAt = Date.now();
 			logger.info(
@@ -236,9 +242,11 @@ export class ScannerService {
 				);
 			}
 
-			const eligibleSources = [...existingEligibleSources, ...newEligibleSources];
+			const eligibleSources = [...existingEligibleSummary.buildSources, ...newEligibleSummary.buildSources];
+			const eligibleCount = existingEligibleSummary.eligibleCount + newEligibleSummary.eligibleCount;
+			const readyReusedCount = existingEligibleSummary.reusedReadyCount + newEligibleSummary.reusedReadyCount;
 			logger.info(
-				`Phase 3 — cache build candidates total="${eligibleSources.length}" existing="${existingEligibleSources.length}" new="${newEligibleSources.length}".`
+				`Phase 3 — cache build candidates total="${eligibleSources.length}" existing="${existingEligibleSummary.buildSources.length}" new="${newEligibleSummary.buildSources.length}" readyReused="${readyReusedCount}".`
 			);
 			let readyCount = 0;
 			let skippedCount = 0;
@@ -262,7 +270,7 @@ export class ScannerService {
 			logger.info(
 				`scanCompareUpdate summary scanRoot="${scanRootPath}" newFiles="${newFiles.length}" inserted="${insertedNewFiles.length}" ` +
 				`specialZipReady="${specialArtifactReadyCount}" specialZipSkipped="${specialArtifactSkippedCount}" specialZipError="${specialArtifactErrorCount}" ` +
-				`eligible="${eligibleSources.length}" cacheReady="${readyCount}" cacheSkipped="${skippedCount}" cacheError="${errorCount}" ` +
+				`eligible="${eligibleCount}" readyReused="${readyReusedCount}" buildCandidates="${eligibleSources.length}" cacheReady="${readyCount}" cacheSkipped="${skippedCount}" cacheError="${errorCount}" ` +
 				`cacheGcCandidates="${cacheGcSummary.candidates}" cacheGcRemoved="${cacheGcSummary.removed}" cacheGcBytesFreed="${humanFileSize(cacheGcSummary.bytesFreed, true)}" ` +
 				`removedByParentHash="${removedFilesCount}" removedByFileHash="${removedByFileHashCount}" ` +
 				`metadataCompleted="${metadataCompleted}" insertFailed="${insertFailed}" ` +
@@ -412,11 +420,13 @@ export class ScannerService {
 	private async resolveEligibleComicSources(
 		files: File[],
 		scope: "existing" | "new"
-	): Promise<EligibleComicSource[]> {
+	): Promise<EligibleComicSourceResolutionSummary> {
 		const total = files.length;
 		const progressEvery = this.getCandidateProgressEvery(total);
 		const startedAt = Date.now();
-		const sources: EligibleComicSource[] = [];
+		const buildSources: EligibleComicSource[] = [];
+		let eligibleCount = 0;
+		let reusedReadyCount = 0;
 		let skipped = 0;
 		const reasonCounts = new Map<ComicEligibilityReason, number>();
 
@@ -429,7 +439,12 @@ export class ScannerService {
 			reasonCounts.set(resolution.reason, (reasonCounts.get(resolution.reason) || 0) + 1);
 
 			if (source) {
-				sources.push(source);
+				eligibleCount++;
+				if (resolution.reason === "ready-state") {
+					reusedReadyCount++;
+				} else {
+					buildSources.push(source);
+				}
 			} else {
 				skipped++;
 			}
@@ -437,16 +452,20 @@ export class ScannerService {
 			const completed = index + 1;
 			if (completed === total || completed % progressEvery === 0) {
 				logger.info(
-					`Candidate resolution progress scope="${scope}" completed="${completed}/${total}" eligible="${sources.length}" skipped="${skipped}" result="${resolution.result}" reason="${resolution.reason}" path="${path.join(file.parentPath, file.name)}".`
+					`Candidate resolution progress scope="${scope}" completed="${completed}/${total}" eligible="${eligibleCount}" readyReused="${reusedReadyCount}" buildCandidates="${buildSources.length}" skipped="${skipped}" result="${resolution.result}" reason="${resolution.reason}" path="${path.join(file.parentPath, file.name)}".`
 				);
 			}
 		}
 
 		logger.info(
-			`Candidate resolution complete scope="${scope}" total="${total}" eligible="${sources.length}" skipped="${skipped}" reasons="${this.formatReasonCounts(reasonCounts)}" elapsedMs="${Date.now() - startedAt}".`
+			`Candidate resolution complete scope="${scope}" total="${total}" eligible="${eligibleCount}" readyReused="${reusedReadyCount}" buildCandidates="${buildSources.length}" skipped="${skipped}" reasons="${this.formatReasonCounts(reasonCounts)}" elapsedMs="${Date.now() - startedAt}".`
 		);
 
-		return sources;
+		return {
+			buildSources,
+			eligibleCount,
+			reusedReadyCount
+		};
 	}
 
 	private resolveZipOnlySpecialDirectories(

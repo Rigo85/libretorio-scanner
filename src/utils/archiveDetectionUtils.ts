@@ -5,7 +5,7 @@ import { File, FileKind } from "(src)/models/interfaces/File";
 import { ComicArchiveFormat, EligibleComicSource } from "(src)/models/interfaces/EligibleComicSource";
 import { Logger } from "(src)/helpers/Logger";
 import { ComicCacheStateService } from "(src)/services/ComicCacheStateService";
-import { getStatePath } from "(src)/utils/comicCacheUtils";
+import { getStatePath, validateChunkCacheShallow } from "(src)/utils/comicCacheUtils";
 
 const logger = new Logger("ArchiveDetection");
 
@@ -83,20 +83,26 @@ export async function resolveEligibleComicSource(file: File): Promise<ComicEligi
 	const sourcePath = path.join(file.parentPath, file.name);
 
 	if (file.fileKind === FileKind.COMIC_MANGA) {
+		const source: EligibleComicSource = {
+			dbId: file.id,
+			coverId: file.coverId,
+			fileHash: file.fileHash,
+			name: file.name,
+			parentPath: file.parentPath,
+			fileKind: file.fileKind,
+			sourcePath,
+			sourceType: "directory",
+			requiresZipArtifact: true
+		};
+		const readyResolution = await resolveReadyReusableSource(file, source);
+		if (readyResolution) {
+			return readyResolution;
+		}
+
 		return {
 			result: "eligible",
 			reason: "special-directory",
-			source: {
-				dbId: file.id,
-				coverId: file.coverId,
-				fileHash: file.fileHash,
-				name: file.name,
-				parentPath: file.parentPath,
-				fileKind: file.fileKind,
-				sourcePath,
-				sourceType: "directory",
-				requiresZipArtifact: true
-			}
+			source
 		};
 	}
 
@@ -132,20 +138,16 @@ export async function resolveEligibleComicSource(file: File): Promise<ComicEligi
 	}
 
 	logComicExtensionMismatch(file, sourcePath, archiveFormat);
-
-	const reusableState = await ComicCacheStateService.getInstance().read(getStatePath(file.coverId));
-	if (canReuseReadyState(reusableState, file, archiveFormat)) {
-		return {
-			result: "eligible",
-			reason: "ready-state",
-			source: buildArchiveSource(file, sourcePath, archiveFormat)
-		};
+	const source = buildArchiveSource(file, sourcePath, archiveFormat);
+	const readyResolution = await resolveReadyReusableSource(file, source);
+	if (readyResolution) {
+		return readyResolution;
 	}
 
 	return {
 		result: "eligible",
 		reason: "direct-comic-extension",
-		source: buildArchiveSource(file, sourcePath, archiveFormat)
+		source
 	};
 }
 
@@ -256,11 +258,36 @@ function canReuseReadyState(
 		archiveFormat?: ComicArchiveFormat;
 	} | undefined,
 	file: File,
-	archiveFormat: ComicArchiveFormat
+	archiveFormat?: ComicArchiveFormat
 ): boolean {
 	return state?.status === "ready"
 		&& state.fileHash === file.fileHash
-		&& (state.archiveFormat === undefined || state.archiveFormat === archiveFormat);
+		&& (
+			archiveFormat === undefined
+				? state.archiveFormat === undefined
+				: (state.archiveFormat === undefined || state.archiveFormat === archiveFormat)
+		);
+}
+
+async function resolveReadyReusableSource(
+	file: File,
+	source: EligibleComicSource
+): Promise<ComicEligibilityResolution | undefined> {
+	const reusableState = await ComicCacheStateService.getInstance().read(getStatePath(file.coverId));
+	if (!canReuseReadyState(reusableState, file, source.archiveFormat)) {
+		return undefined;
+	}
+
+	const validation = await validateChunkCacheShallow(file.coverId, source.requiresZipArtifact, undefined, reusableState);
+	if (!validation.valid) {
+		return undefined;
+	}
+
+	return {
+		result: "eligible",
+		reason: "ready-state",
+		source
+	};
 }
 
 function logComicExtensionMismatch(file: File, sourcePath: string, detectedBackend: ComicArchiveFormat): void {

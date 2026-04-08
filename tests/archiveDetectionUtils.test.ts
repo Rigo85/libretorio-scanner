@@ -5,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 
 import { config } from "(src)/config/configuration";
 import { FileKind } from "(src)/models/interfaces/File";
-import { ComicCacheStateService } from "(src)/services/ComicCacheStateService";
-import { getStatePath } from "(src)/utils/comicCacheUtils";
+import { getChunkPath, getStatePath } from "(src)/utils/comicCacheUtils";
 import {
 	detectArchiveFormatByPathOrMagic,
 	resolveEligibleComicSource,
@@ -142,7 +141,9 @@ describe("archiveDetectionUtils", () => {
 	it("reuses ready state for declared comic sources", async () => {
 		const filePath = path.join(tempDir, "bundle.cbr");
 		await fs.writeFile(filePath, Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]));
-		jest.spyOn(ComicCacheStateService.getInstance(), "read").mockResolvedValue({
+		const statePath = getStatePath("cover-bundle-rar");
+		await fs.ensureDir(path.dirname(statePath));
+		await fs.writeJson(statePath, {
 			version: 1,
 			status: "ready",
 			sourcePath: filePath,
@@ -156,6 +157,9 @@ describe("archiveDetectionUtils", () => {
 			zipReady: false,
 			chunksReady: true
 		});
+		await fs.writeFile(getChunkPath("cover-bundle-rar", 0), "{\"index\":0}");
+		await fs.writeFile(getChunkPath("cover-bundle-rar", 1), "{\"index\":1}");
+		await fs.writeFile(getChunkPath("cover-bundle-rar", 2), "{\"index\":2}");
 
 		const resolution = await resolveEligibleComicSource({
 			id: 104,

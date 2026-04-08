@@ -201,6 +201,60 @@ export async function validateChunkCache(
 	}
 }
 
+export async function validateChunkCacheShallow(
+	coverId: string,
+	requireZipArtifact: boolean,
+	cacheDir: string = getCacheDir(coverId),
+	stateOverride?: ComicCacheState
+): Promise<ChunkCacheValidationResult> {
+	const statePath = getStatePath(coverId, cacheDir);
+
+	if (!(await fs.pathExists(cacheDir)) || !(await fs.pathExists(statePath))) {
+		return {valid: false, chunkCount: 0, totalPages: 0};
+	}
+
+	try {
+		const state = stateOverride || JSON.parse(await fs.readFile(statePath, "utf8")) as ComicCacheState;
+
+		if (state.status !== "ready" || !state.chunksReady || state.chunkCount < 1 || state.totalPages < 1) {
+			return {valid: false, chunkCount: 0, totalPages: 0};
+		}
+
+		for (let index = 0; index < state.chunkCount; index++) {
+			const chunkPath = getChunkPath(coverId, index, cacheDir);
+			if (!(await fs.pathExists(chunkPath))) {
+				return {valid: false, chunkCount: 0, totalPages: 0};
+			}
+
+			const chunkStats = await fs.stat(chunkPath);
+			if (!chunkStats.isFile() || chunkStats.size <= 0) {
+				return {valid: false, chunkCount: 0, totalPages: 0};
+			}
+		}
+
+		if (requireZipArtifact) {
+			if (!state.zipReady) {
+				return {valid: false, chunkCount: 0, totalPages: 0};
+			}
+
+			const zipPath = getZipPath(coverId, cacheDir);
+			if (!(await fs.pathExists(zipPath))) {
+				return {valid: false, chunkCount: 0, totalPages: 0};
+			}
+
+			const zipStats = await fs.stat(zipPath);
+			if (!zipStats.isFile() || zipStats.size <= 0) {
+				return {valid: false, chunkCount: 0, totalPages: 0};
+			}
+		}
+
+		return {valid: true, chunkCount: state.chunkCount, totalPages: state.totalPages};
+	} catch (error) {
+		logger.error(`validateChunkCacheShallow "${coverId}":`, error);
+		return {valid: false, chunkCount: 0, totalPages: 0};
+	}
+}
+
 export function normalizeSortKey(value: string): string {
 	return value
 		.replace(/\\/g, "/")
