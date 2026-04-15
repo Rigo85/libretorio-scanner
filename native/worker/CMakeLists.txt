@@ -8,7 +8,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ARCHIVE REQUIRED IMPORTED_TARGET libarchive)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips)
-find_package(nlohmann_json REQUIRED)
 find_library(UNRAR_LIB unrar REQUIRED)
 
 set(SEVEN_Z_SDK_SOURCES
@@ -60,7 +59,6 @@ target_compile_definitions(comic-cache-worker PRIVATE
 target_link_libraries(comic-cache-worker PRIVATE
     PkgConfig::ARCHIVE
     PkgConfig::VIPS
-    nlohmann_json::nlohmann_json
     ${UNRAR_LIB}
 )
 

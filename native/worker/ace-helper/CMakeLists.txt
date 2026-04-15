@@ -39,10 +39,6 @@ target_include_directories(comic-cache-ace-helper PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(comic-cache-ace-helper PRIVATE
-    nlohmann_json::nlohmann_json
-)
-
 add_dependencies(comic-cache-ace-helper comic-cache-unace-internal)
 
 install(TARGETS comic-cache-ace-helper RUNTIME DESTINATION bin)
