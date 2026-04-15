@@ -115,8 +115,15 @@ export class NativeComicCacheWorkerService {
 				};
 			} catch (error) {
 				logger.error(`runNativeWorker "${inputPath}":`, error);
+				if (backend === "ace") {
+					throw error;
+				}
 				logger.info(`Falling back to JS extraction for "${inputPath}".`);
 			}
+		}
+
+		if (backend === "ace") {
+			throw new Error(`Native comic cache worker is required for ACE archive extraction: "${inputPath}".`);
 		}
 
 		await fs.ensureDir(rawDir);
@@ -378,7 +385,7 @@ export class NativeComicCacheWorkerService {
 	}
 
 	private normalizeWorkerBackend(value?: string): ComicArchiveFormat | undefined {
-		if (value === "rar" || value === "zip" || value === "7z" || value === "tar") {
+		if (value === "ace" || value === "rar" || value === "zip" || value === "7z" || value === "tar") {
 			return value;
 		}
 
@@ -390,6 +397,10 @@ export class NativeComicCacheWorkerService {
 		rawDir: string,
 		backend: ComicArchiveFormat
 	): Promise<void> {
+		if (backend === "ace") {
+			throw new Error(`ACE archives require the native comic cache worker: "${inputPath}".`);
+		}
+
 		if (backend === "zip") {
 			await this.extractZip(inputPath, rawDir);
 			return;

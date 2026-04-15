@@ -1,0 +1,240 @@
+unace-nonfree (2.5-10) unstable; urgency=medium
+
+  [ Debian Janitor ]
+  * Remove constraints unnecessary since stretch:
+    + Build-Depends: Drop versioned constraint on debhelper.
+  * Use secure copyright file specification URI.
+  * Bump debhelper dependency to >= 10, since that's what is used in
+    debian/compat.
+  * Bump debhelper from old 10 to 13.
+  * Set debhelper-compat version in Build-Depends.
+  * Change priority extra to priority optional.
+  * Update Vcs-* headers to use salsa repository.
+  * Fix day-of-week for changelog entries 2.5-7, 2.5-3, 2.5-1.
+  * Avoid explicitly specifying -Wl,--as-needed linker flag.
+
+  [ David Seifert ]
+  * debian/patches/10-uninorm-signedness.patch: Include patch from
+    Gentoo, #include "unincore.h" in unincore.c
+
+  [ Bjarni Ingi Gislason ]
+  * unace.1: Fix some formatting mistakes (Closes: #923355)
+
+  [ Fabian Greffrath ]
+  * debian/patches/10-uninorm-signedness.patch: Fix some char
+    signedness inconsistencies
+  * debian/patches/18-stack-corruption.patch: Unfuzz
+  * debian/patches/19-max-allocate.patch: Remove unused local
+    variables
+  * debian/patches/22-increase-percent-str.patch: New patch, increase
+    percent string buffer length
+  * debian/patches/23-init-local-variables.patch: New patch,
+    initialize some local variables, remove some unused ones
+  * debian/patches/24-faulty-memcpy.patch: New patch, remove a faulty
+    memcpy() call which attempts to copy a DIR to a struct findi64_t
+    with the size of a pointer
+  * debian/patches/25-string-truncation.patch: New patch, fix some
+    potential string truncation issues
+  * debian/patches/26-check-return-value.patch: New patch, check
+    return values of some critical functions
+  * debian/patches/27-build-date.patch: New patch, allow one to build
+    reproducibly
+  * Include /usr/share/dpkg/pkg-info.mk and define the BUILD_DATE
+    macro
+  * Rules-Requires-Root: no
+  * Update my Debian packaging copyright
+  * Fix typos in patch descriptions
+  * Bump Standards-Version to 4.7.2
+  * Bump debian/watch file standards version to 4
+
+ -- Fabian Greffrath <fabian@debian.org>  Sun, 09 Mar 2025 16:56:10 +0100
+
+unace-nonfree (2.5-9) unstable; urgency=medium
+
+  * Add patch by Daniel Roethlisberger to fix an issue that caused archives
+    using PIC mode to be decompressed incorrectly.
+  * Update d/control and d/copyright and use my Debian mail address.
+  * Fix vcs-field-uses-insecure-uri lintian warnings.
+  * Bump Standards-Version to 3.9.8.
+  * Bump debhelper compat to 10.
+
+ -- Fabian Greffrath <fabian@debian.org>  Sun, 18 Jun 2017 21:18:45 +0200
+
+unace-nonfree (2.5-8) unstable; urgency=medium
+
+  * debian/patches/03-gcc-call.patch:
+    + Remove "-ggdb" from the compiler flags, let dpkg-buildflags handle them.
+  * debian/patches/14-endianness-detection.patch:
+    + Include missing <endian.h> header in endianness detection patch.
+    + Fixes instant segmentation faults for unoptimized builds
+      (Closes: #775504).
+  * debian/patches/16-buffer-overflows.patch:
+    + New patch: Fix buffer overflows when using long filenames or passwords
+      as arguments.
+    + Thanks, Antoine Cervoise (Closes: #736929).
+  * debian/patches/17-undefined-behavior-strcpy.patch:
+    + New patch: Avoid undefined behaviour when strcpy(3) is called with the
+      same pointer as source and destination.
+    + Thanks, Jakub Wilk (Closes: #775132).
+  * debian/patches/18-stack-corruption.patch:
+    + Fix a stack corruption while trying to verify integrity of a fuzzed file.
+    + Thanks again, Jakub Wilk (Closes: #775134).
+  * debian/patches/19-max-allocate.patch:
+    + Allocate a whole 16 MB at once instead of iterating in 128 kB steps.
+    + Thanks again, Jakub Wilk (Closes: #775508).
+  * debian/patches/20-isatty.diff:
+    + Do not hang forever if stdin is redirected to /dev/null.
+    + Patch by Jakub Wilk (Closes: #775511).
+
+  * debian/control:
+    + Bump Standards-Version to 3.9.6.
+  * debian/copyright:
+    + Fix empty-short-license-in-dep5-copyright.
+    + Add missing license for source/base/all/uninorm/unincore.c.
+    + Update copyright years.
+  * debian/rules:
+    + Remove "-pedantic" from the compiler flags, the noise it adds is not
+      really helpful.
+    + Add quirks to allow dh_auto_clean to clean the unpatched source tree.
+
+ -- Fabian Greffrath <fabian+debian@greffrath.com>  Tue, 05 May 2015 08:39:03 +0200
+
+unace-nonfree (2.5-7) unstable; urgency=low
+
+  * Convert to "3.0 (quilt)" source format.
+  * Convert all patches from dpatch to quilt.
+  * Add DEP-3 compliant headers to all patches.
+  * Convert debian/copyright to DEP-5 compliant format.
+  * Convert debian/rules to debhelper 7 short-form format.
+  * Add debian/unace-nonfree.{install,manpages} files.
+  * Rename debian/{postrm,preinst} to unace-nonfree.{postrm,preinst}.
+  * Add Homepage field to debian/control.
+  * Bump Standards-Version to 3.9.2.
+  * Mangle upstream version in debian/watch, not Debian version.
+  * Bump debhelper compatibility to v9.
+
+  * debian/patches/03-gcc-call.patch:
+    + Apply CPPFLAGS during build.
+  * debian/patches/14-endianness-detection.patch:
+    + New patch from Gentoo to make the check for endianness actually occur.
+    + With this patch, Gentoo has masked unace unstable on ~hppa, ~ppc
+      and ~ppc64. Feel brave and change Architecture to "any", too.
+  * debian/patches/15-format-security.patch:
+    + New patch, fix format string vulnarability.
+
+  [ Jari Aalto ]
+  * debian/control
+    + Bump Standards-Version to 3.9.3.1
+  * debian/copyright:
+    + Update to format 1.0
+    + Delete EOL whitespaces.
+  * debian/rules
+    + Use hardened CFLAGS.
+      http://wiki.debian.org/ReleaseGoals/SecurityHardeningBuildFlags
+
+ -- Fabian Greffrath <fabian+debian@greffrath.com>  Thu, 08 Mar 2012 11:13:51 +0100
+
+unace-nonfree (2.5-6) unstable; urgency=low
+
+  * Updated my email address.
+  * Bumped Standards-Version to 3.8.3.
+  * Removed duplicate binary control field "section".
+  * Added debian/README.source file.
+  * Fixed Debian packaging copyright information.
+  * debian/patches/13-maximum-file-name-length.dpatch: New patch,
+    increase buffer to cater for maximum file name length (LP: #179684).
+  * Added debian/watch file.
+
+ -- Fabian Greffrath <fabian+debian@greffrath.com>  Mon, 14 Dec 2009 09:23:43 +0100
+
+unace-nonfree (2.5-5) unstable; urgency=low
+
+  * Upload to unstable.
+  * debian/control:
+    + Bumped Standards-Version to 3.7.3.
+  * debian/patches/03-gcc-call.dpatch:
+    + Merged with a patch courtesy of Mike Frysinger <vapier@gentoo.org>
+      that "uses standard env vars so it behaves like autotools and removes
+      pointless -I paths that for native builds are redundant and for cross
+      builds broken." Thank you very much!
+
+ -- Fabian Greffrath <fabian@debian-unofficial.org>  Fri, 11 Apr 2008 16:00:00 +0100
+
+unace-nonfree (2.5-4) experimental; urgency=low
+
+  * Upload to experimental.
+  * debian/control:
+    + Build on all little-endian architectures.
+
+ -- Fabian Greffrath <fabian@debian-unofficial.org>  Mon, 11 Feb 2008 10:00:00 +0100
+
+unace-nonfree (2.5-3) unstable; urgency=low
+
+  * debian/control:
+    + Dropped useless libncurses-dev from Build-Depends.
+    + Reduced supported Archs to i386 and amd64 for the time being.
+    + Added ${misc:Depends} to Depends.
+  * debian/rules:
+    + Patch before clean, unpatch after clean.
+    + Do not ignore 'make clean' errors anymore.
+  * debian/patches/01-rm-f.dpatch:
+    + Updated to force remove in clean rule.
+  * debian/patches/03-gcc-call.dpatch:
+    + Updated to call the C-Compiler via $(CC) and drop useless
+      linking against libncurses.
+
+  * Applied a series of patches courtesy of Michael Karcher
+    <debian@mkarcher.dialup.fu-berlin.de>:
+  * debian/patches/02-no-io_h.dpatch:
+    + Updated to include <unistd.h> instead of <io.h>.
+  * debian/patches/04-64bit.dpatch:
+    + Replace declare.h by a generic stdint based version (Closes: #449395).
+  * debian/patches/05-warning-fixes.dpatch:
+    + This patch fixes harmless warnings, mostly suggested parentheses.
+  * debian/patches/06-fix-bad-pointer-arith.dpatch:
+    + This patch removes non-portable pointer arithmetics and useless
+      casts of pointers to integers.
+  * debian/patches/07-fix-free-aliasing-issue.dpatch:
+    + This patch redefines how BASE_MEMORY_FreeCheck works, and avoids
+      tons of "may break strict aliasing rules" warnings. It also removes
+      casts on invocation.
+  * debian/patches/08-ulonglong-printf.dpatch:
+    + This patch fixes a portability issue about printing big numbers.
+  * debian/patches/09-utf8-filenames.dpatch:
+    + This patch makes unace use utf8 filenames on linux instead of Latin1.
+  * debian/patches/10-uninorm-signedness.dpatch:
+    + Fixes prototypes in unincore.h to match uninorm.c.
+  * debian/patches/11-possibly-critical.dpatch:
+    + Fixes a possible security issue by initialising a local variable.
+  * debian/patches/12-cast-filetime.dpatch:
+    + Expresses access to bitfield as 32 bit variable using a union to
+      not violate the strict aliasing rule. The code is still inherently
+      non-portable.
+
+ -- Fabian Greffrath <fabian@debian-unofficial.org>  Fri, 23 Nov 2007 10:15:00 +0100
+
+unace-nonfree (2.5-2) unstable; urgency=low
+
+  * Split and re-organized patches.
+  * debian/changelog:
+    + Reassigned closed bug numbers in previous changelog entry.
+  * debian/control:
+    + Changed priority from optional to extra.
+    + Added 'XS-Autobuild: yes' field.
+  * debian/copyright:
+    + Designated package as autobuildable.
+    + Added copyright notice for the Debian packaging.
+  * debian/rules:
+    + Define CFLAGS and pass them to $(MAKE) call.
+    + Pass manpage/unace.1 to dh_installman call.
+  * debian/manpages:
+    + Removed.
+
+ -- Fabian Greffrath <fabian@debian-unofficial.org>  Tue,   3 Jul 2007 15:18:00 +0100
+
+unace-nonfree (2.5-1) unstable; urgency=low
+
+  * Initial release (Closes: #259761).
+  * Added diversions to the free unace binary and manpage (Closes: #332598).
+
+ -- Fabian Greffrath <fabian@debian-unofficial.org>  Fri, 30 Dec 2005 17:42:32 +0100

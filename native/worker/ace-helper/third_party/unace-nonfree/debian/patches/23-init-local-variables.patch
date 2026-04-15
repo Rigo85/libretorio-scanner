@@ -1,0 +1,73 @@
+Author: Fabian Greffrath <fabian@debian.org>
+Description: Initialize some local variables, remove some unused ones.
+
+--- a/source/apps/exe/input/input.c
++++ b/source/apps/exe/input/input.c
+@@ -170,7 +170,7 @@ CHAR      ShortStr1[80],
+ INT       TimeCount;
+ UINT      ButtonNumber;
+ PCHAR     ButtonPtr;
+-PCHAR     Output;
++PCHAR     Output = 0;
+ 
+   APPS_EXE_CONVERT_MakeStrShorter(ShortStr1, Description1, 79);
+   APPS_EXE_CONVERT_MakeStrShorter(ShortStr2, Description2, 79);
+--- a/source/base/all/archives/read/read.c
++++ b/source/base/all/archives/read/read.c
+@@ -33,14 +33,12 @@ void    BASE_ARCHIVES_READ_GetArchiveLis
+ INT       I;
+ tLFN      FileName;
+ PCHAR     ArchiveFileName;
+-SHORT     Attr;
+ 
+   ArchiveFileName = BASE_ARCHIVES_READ.FileNames;
+ 
+   for (I = 0; I < BASE_ARCHIVES_READ.FileNumber; I++)
+   {
+     strcpy(FileName, ArchiveFileName);
+-    Attr = BASE_ARCHIVES_READ.FileData[I].Attr;
+ 
+     (*BASE_ARCHIVES_READ.ProcessFile)
+       (FileName, BASE_ARCHIVES_READ.FileData[I]);
+--- a/source/base/all/dcpr/pic/c/pic.c
++++ b/source/base/all/dcpr/pic/c/pic.c
+@@ -133,7 +133,7 @@ INT       K,
+           BestPredictor,
+           BestErrorCount;
+ UCHAR     MEpsilon,
+-          Predicted;
++          Predicted = 0;
+ SCHAR     Epsilon;
+ 
+   BASE_DCPR_PIC.CurContext[BASE_DCPR_PIC.CurState].UsedCounter++;
+--- a/source/base/all/dcpr/sound/c/sound.c
++++ b/source/base/all/dcpr/sound/c/sound.c
+@@ -177,7 +177,7 @@ void    BASE_DCPR_SOUND_RarAdjust(INT Ch
+ INT       PredDif,
+           I,
+           MinDif,
+-          MinDifPos,
++          MinDifPos = 0,
+           PCh;
+ 
+   BASE_DCPR_SOUND.SoundVar.ByteCount[Channel]++;
+--- a/source/base/all/lfn/lfn.c
++++ b/source/base/all/lfn/lfn.c
+@@ -52,7 +52,7 @@ INT       SavedDrive;
+ 
+ INT     BASE_LFN_Open(PCHAR Path, INT Access,...)
+ {
+-INT       Permission;
++INT       Permission = 0;
+ va_list   ArgumentList;
+ 
+   if (Access & O_CREAT)
+@@ -72,7 +72,7 @@ va_list   ArgumentList;
+ 
+ INT     BASE_LFN_ShareOpen(PCHAR Path, INT Access, BOOL WriteAccess,...)
+ {
+-INT       Permission;
++INT       Permission = 0;
+ va_list   ArgumentList;
+ 
+   if (Access & O_CREAT)

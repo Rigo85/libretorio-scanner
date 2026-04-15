@@ -1,0 +1,27 @@
+#!/bin/sh
+
+set -e
+
+case "$1" in
+	install)
+		dpkg-divert --package unace-nonfree --add --rename --divert \
+		/usr/bin/unace-free /usr/bin/unace
+
+		dpkg-divert --package unace-nonfree --add --rename --divert \
+		/usr/share/man/man1/unace-free.1.gz /usr/share/man/man1/unace.1.gz
+		;;
+
+	upgrade|abort-upgrade)
+
+		;;
+
+	*)
+		echo "preinst called with unknown argument \`$1'" >&2
+		exit 1
+		;;
+
+esac
+
+#DEBHELPER#
+
+exit 0

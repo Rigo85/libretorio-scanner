@@ -1,6 +1,6 @@
 import { FileKind } from "(src)/models/interfaces/File";
 
-export type ComicArchiveFormat = "rar" | "zip" | "7z" | "tar";
+export type ComicArchiveFormat = "ace" | "rar" | "zip" | "7z" | "tar";
 export type ComicSourceType = "directory" | "archive-file";
 
 export interface EligibleComicSource {

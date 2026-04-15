@@ -1,0 +1,21 @@
+Source: unace-nonfree
+Section: non-free/utils
+Priority: optional
+Maintainer: Fabian Greffrath <fabian@debian.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.2
+XS-Autobuild: yes
+Homepage: http://www.winace.com/
+Vcs-Git: https://salsa.debian.org/fabian/unace-nonfree.git
+Vcs-Browser: https://salsa.debian.org/fabian/unace-nonfree
+Rules-Requires-Root: no
+
+Package: unace-nonfree
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: extract, test and view .ace archives (non-free version)
+ The unace utility is used for extracting, testing and viewing the contents of
+ archives created with the ACE archiver.
+ .
+ Unlike the unace package which can only extract ACE 1.0 archives, the
+ unace-nonfree package allows one to unpack all current ACE archives.

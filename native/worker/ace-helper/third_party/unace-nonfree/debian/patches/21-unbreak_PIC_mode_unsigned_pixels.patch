@@ -1,0 +1,41 @@
+Author: Daniel Roethlisberger <daniel@roe.ch>
+Description: I found and fixed an issue in latest unace-nonfree-2.5 that
+ caused archives using PIC mode to be decompressed incorrectly.
+ The same bug is also present in upstream unace for Linux and I
+ have reported the bug and patch to Marcel Lemke.  However, Marcel
+ told me that he does not currently have a dev environment ready,
+ so waiting for an upstream fix may take a while.
+ .
+ Please find the patch that fixes the issues for me attached; if
+ you can confirm that it fixes the issue also for you then I would
+ suggest you add that patch to the Debian patches for
+ unace-nonfree until such a time when Marcel releases a fixed
+ upstream version, if ever.
+ .
+ Also attached is an ACE archive that reproduces the issue;
+ without patch I get CRC errors when testing or extracting it,
+ with the patch the archive tests and extracts fine.  That ACE
+ archive also decompresses fine in WinACE.
+
+--- a/source/base/all/dcpr/pic/c/pic.c
++++ b/source/base/all/dcpr/pic/c/pic.c
+@@ -132,7 +132,7 @@ void    BASE_DCPR_PIC_Pixel(void)
+ INT       K,
+           BestPredictor,
+           BestErrorCount;
+-CHAR      MEpsilon,
++UCHAR     MEpsilon,
+           Predicted;
+ SCHAR     Epsilon;
+ 
+--- a/source/base/all/dcpr/pic/pic.h
++++ b/source/base/all/dcpr/pic/pic.h
+@@ -24,7 +24,7 @@ typedef struct
+                 CurCol,
+                 CurState,
+                 CurPred;
+-        CHAR    PixelA,
++        UCHAR   PixelA,
+                 PixelB,
+                 PixelC,
+                 PixelD,

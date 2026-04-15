@@ -27,11 +27,13 @@ std::unique_ptr<ArchiveBackend> createRarBackend();
 std::unique_ptr<ArchiveBackend> createZipBackend();
 std::unique_ptr<ArchiveBackend> createSevenZBackend();
 std::unique_ptr<ArchiveBackend> createTarBackend();
+std::unique_ptr<ArchiveBackend> createAceBackend();
 
 namespace {
 
 enum class BackendKind {
     Unknown,
+    Ace,
     Rar,
     Zip,
     SevenZ,
@@ -132,7 +134,7 @@ void emitEvent(const std::string& type, const std::string& payload) {
 void printUsage(const char* program) {
     std::cerr
         << "Usage: " << program
-        << " (--input FILE [--backend auto|rar|zip|7z|tar] | --input-dir DIR)"
+        << " (--input FILE [--backend auto|ace|rar|zip|7z|tar] | --input-dir DIR)"
         << " --output DIR"
         << " [--reader-format jpeg|webp]"
         << " [--reader-max-dimension INT]"
@@ -202,6 +204,7 @@ bool parseArgs(int argc, char* argv[], CliArgs& args) {
 }
 
 BackendKind parseBackendKind(const std::string& value) {
+    if (value == "ace") return BackendKind::Ace;
     if (value == "rar") return BackendKind::Rar;
     if (value == "zip") return BackendKind::Zip;
     if (value == "7z") return BackendKind::SevenZ;
@@ -212,6 +215,8 @@ BackendKind parseBackendKind(const std::string& value) {
 
 const char* backendName(BackendKind backend) {
     switch (backend) {
+        case BackendKind::Ace:
+            return "ace";
         case BackendKind::Rar:
             return "rar";
         case BackendKind::Zip:
@@ -233,6 +238,7 @@ BackendKind detectBackendByExtension(const std::string& inputPath) {
         return static_cast<char>(std::tolower(value));
     });
 
+    if (ext == ".ace" || ext == ".cba") return BackendKind::Ace;
     if (ext == ".cbr" || ext == ".rar") return BackendKind::Rar;
     if (ext == ".cbz" || ext == ".zip") return BackendKind::Zip;
     if (ext == ".cb7" || ext == ".7z") return BackendKind::SevenZ;
@@ -246,9 +252,17 @@ BackendKind detectBackendByMagic(const std::string& inputPath) {
         return BackendKind::Unknown;
     }
 
-    std::array<unsigned char, 262> header{};
+    std::array<unsigned char, 512> header{};
     input.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
     const std::streamsize bytesRead = input.gcount();
+
+    if (bytesRead >= 7) {
+        const std::array<unsigned char, 7> ace = {'*', '*', 'A', 'C', 'E', '*', '*'};
+        const auto headerEnd = header.begin() + bytesRead;
+        if (std::search(header.begin(), headerEnd, ace.begin(), ace.end()) != headerEnd) {
+            return BackendKind::Ace;
+        }
+    }
 
     if (bytesRead >= 7) {
         const std::array<unsigned char, 7> rar4 = {0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00};
@@ -307,6 +321,8 @@ std::unique_ptr<ArchiveBackend> createBackend(BackendKind backend) {
     switch (backend) {
         case BackendKind::Rar:
             return createRarBackend();
+        case BackendKind::Ace:
+            return createAceBackend();
         case BackendKind::Zip:
             return createZipBackend();
         case BackendKind::SevenZ:

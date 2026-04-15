@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ARCHIVE REQUIRED IMPORTED_TARGET libarchive)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips)
+find_package(nlohmann_json REQUIRED)
 find_library(UNRAR_LIB unrar REQUIRED)
 
 set(SEVEN_Z_SDK_SOURCES
@@ -34,6 +35,7 @@ set(SEVEN_Z_SDK_SOURCES
 
 add_executable(comic-cache-worker
     src/app/main.cpp
+    src/archive/ace_backend.cpp
     src/archive/archive_entry_utils.cpp
     src/archive/libarchive_base.cpp
     src/archive/rar_backend.cpp
@@ -58,7 +60,11 @@ target_compile_definitions(comic-cache-worker PRIVATE
 target_link_libraries(comic-cache-worker PRIVATE
     PkgConfig::ARCHIVE
     PkgConfig::VIPS
+    nlohmann_json::nlohmann_json
     ${UNRAR_LIB}
 )
+
+add_subdirectory(ace-helper)
+add_dependencies(comic-cache-worker comic-cache-ace-helper)
 
 install(TARGETS comic-cache-worker RUNTIME DESTINATION bin)

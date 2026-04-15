@@ -1,0 +1,15 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/pkg-info.mk
+
+export DEB_BUILD_MAINT_OPTIONS	= hardening=+all
+export DEB_CFLAGS_MAINT_APPEND	= -Wall
+export DEB_CPPFLAGS_MAINT_APPEND = -DBUILD_DATE='"$(shell date --utc --date=@${SOURCE_DATE_EPOCH} +%Y-%m-%d)"'
+
+%:
+	dh $@
+
+override_dh_auto_clean:
+	touch baseace.mk unacedll.mk linunace25.tgz unace
+	dh_auto_clean
+	dh_clean baseace.mk unacedll.mk

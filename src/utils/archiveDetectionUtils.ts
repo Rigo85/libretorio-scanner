@@ -10,6 +10,8 @@ import { getStatePath, validateChunkCacheShallow } from "(src)/utils/comicCacheU
 const logger = new Logger("ArchiveDetection");
 
 const EXTENSION_BACKENDS = new Map<string, ComicArchiveFormat>([
+	[".ace", "ace"],
+	[".cba", "ace"],
 	[".cbr", "rar"],
 	[".cbz", "zip"],
 	[".cb7", "7z"],
@@ -17,6 +19,8 @@ const EXTENSION_BACKENDS = new Map<string, ComicArchiveFormat>([
 ]);
 
 const DIRECT_COMIC_EXTENSIONS = new Set([
+	".ace",
+	".cba",
 	".cbz",
 	".cbr",
 	".cb7",
@@ -232,8 +236,15 @@ function detectArchiveFormatByMagic(filePath: string): ComicArchiveFormat | unde
 
 		const fd = fs.openSync(filePath, "r");
 		try {
-			const header = Buffer.alloc(262);
+			const header = Buffer.alloc(512);
 			const bytesRead = fs.readSync(fd, header, 0, header.length, 0);
+
+			if (bytesRead >= 7) {
+				const ace = Buffer.from("**ACE**", "ascii");
+				if (header.subarray(0, bytesRead).includes(ace)) {
+					return "ace";
+				}
+			}
 
 			if (bytesRead >= 7) {
 				const rar4 = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]);

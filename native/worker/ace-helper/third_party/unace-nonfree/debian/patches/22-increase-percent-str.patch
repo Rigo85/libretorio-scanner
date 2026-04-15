@@ -1,0 +1,14 @@
+Author: Fabian Greffrath <fabian@debian.org>
+Description: Increase percent string buffer length.
+
+--- a/source/apps/exe/convert/convert.h
++++ b/source/apps/exe/convert/convert.h
+@@ -10,7 +10,7 @@
+ 
+ typedef struct
+ {
+-        CHAR    ToPercentStrStr[10];
++        CHAR    ToPercentStrStr[16];
+ } tAPPS_EXE_CONVERT;
+ 
+ DECLEXT tAPPS_EXE_CONVERT

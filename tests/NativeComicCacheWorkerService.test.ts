@@ -38,6 +38,18 @@ describe("NativeComicCacheWorkerService", () => {
 		await expect(fs.pathExists(result.rawDir)).resolves.toBe(true);
 	});
 
+	it("requires the native worker for ace extraction when no binary is available", async () => {
+		const findBinarySpy = jest.spyOn(service as any, "findNativeBinaryPath").mockResolvedValue(undefined);
+		const extractFallbackSpy = jest.spyOn(service as any, "extractWithFallback").mockResolvedValue(undefined);
+
+		await expect(
+			service.extractArchiveToOrderedRaw("/tmp/example.cbr", "cover-ace-no-binary", "ace")
+		).rejects.toThrow(/Native comic cache worker is required for ACE archive extraction/);
+
+		expect(findBinarySpy).toHaveBeenCalledTimes(1);
+		expect(extractFallbackSpy).not.toHaveBeenCalled();
+	});
+
 	it("falls back to JS extraction when the native worker fails", async () => {
 		const findBinarySpy = jest.spyOn(service as any, "findNativeBinaryPath").mockResolvedValue("/fake/comic-cache-worker");
 		const runNativeSpy = jest.spyOn(service as any, "runNativeWorker").mockRejectedValue(new Error("native failed"));
@@ -50,6 +62,20 @@ describe("NativeComicCacheWorkerService", () => {
 		expect(extractFallbackSpy).toHaveBeenCalledTimes(1);
 		expect(result.rawDir).toBe(path.join(result.tempDir, "raw"));
 		await expect(fs.pathExists(result.rawDir)).resolves.toBe(true);
+	});
+
+	it("does not fall back to JS extraction for ace when the native worker fails", async () => {
+		const findBinarySpy = jest.spyOn(service as any, "findNativeBinaryPath").mockResolvedValue("/fake/comic-cache-worker");
+		const runNativeSpy = jest.spyOn(service as any, "runNativeWorker").mockRejectedValue(new Error("native failed"));
+		const extractFallbackSpy = jest.spyOn(service as any, "extractWithFallback").mockResolvedValue(undefined);
+
+		await expect(
+			service.extractArchiveToOrderedRaw("/tmp/example.cbr", "cover-ace-native-error", "ace")
+		).rejects.toThrow("native failed");
+
+		expect(findBinarySpy).toHaveBeenCalledTimes(1);
+		expect(runNativeSpy).toHaveBeenCalledTimes(1);
+		expect(extractFallbackSpy).not.toHaveBeenCalled();
 	});
 
 	it("requires the native worker for resize-enabled source extraction", async () => {

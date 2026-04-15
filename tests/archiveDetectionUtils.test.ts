@@ -40,6 +40,11 @@ describe("archiveDetectionUtils", () => {
 		expect(detectArchiveFormatByPathOrMagic(filePath)).toBe("7z");
 	});
 
+	it("detects ace by extension when the file does not exist", () => {
+		const filePath = path.join(tempDir, "chapter.cba");
+		expect(detectArchiveFormatByPathOrMagic(filePath)).toBe("ace");
+	});
+
 	it("builds an eligible source only for declared comic extensions", async () => {
 		const filePath = path.join(tempDir, "volume.cbz");
 		await fs.writeFile(filePath, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]));
@@ -170,6 +175,36 @@ describe("archiveDetectionUtils", () => {
 		expect(resolution.source).toEqual(expect.objectContaining({
 			sourceType: "archive-file",
 			archiveFormat: "rar"
+		}));
+	});
+
+	it("detects ace magic inside a disguised cbr header", async () => {
+		const filePath = path.join(tempDir, "issue.cbr");
+		await fs.writeFile(
+			filePath,
+			Buffer.concat([
+				Buffer.from("TJS\0\0\0"),
+				Buffer.from("**ACE**", "ascii"),
+				Buffer.alloc(32, 0)
+			])
+		);
+
+		const resolution = await resolveEligibleComicSource({
+			id: 1023,
+			name: "issue.cbr",
+			parentPath: tempDir,
+			parentHash: "parent",
+			fileHash: "hash-ace-disguised",
+			size: "1 KB",
+			coverId: "cover-ace-disguised",
+			fileKind: FileKind.FILE
+		});
+
+		expect(resolution.result).toBe("eligible");
+		expect(resolution.reason).toBe("direct-comic-extension");
+		expect(resolution.source).toEqual(expect.objectContaining({
+			sourceType: "archive-file",
+			archiveFormat: "ace"
 		}));
 	});
 

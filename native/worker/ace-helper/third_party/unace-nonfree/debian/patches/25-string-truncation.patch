@@ -1,0 +1,28 @@
+Author: Fabian Greffrath <fabian@debian.org>
+Description: Fix some potential string truncation issues.
+
+--- a/source/apps/exe/extern/arcblk/arcblk.c
++++ b/source/apps/exe/extern/arcblk/arcblk.c
+@@ -41,7 +41,7 @@ CHAR      OutputStr[80];
+     BASE_STATE_EXTERN_OutputProcess(OutputStr, "", 1);
+ 
+     strncpy(OutputStr, BASE_ARCBLK.Header.Main.AV,
+-            BASE_ARCBLK.Header.Main.AV_SIZE);
++            BASE_ARCBLK.Header.Main.AV_SIZE - 1);
+ 
+     OutputStr[BASE_ARCBLK.Header.Main.AV_SIZE] = 0;
+     OutputStr[50] = 0;
+--- a/source/base/all/arcblk/arcblk.c
++++ b/source/base/all/arcblk/arcblk.c
+@@ -161,9 +161,9 @@ INT       I;
+ 
+   I = Header->File.FNAME_SIZE;
+ 
+-  if (I >= BASE_LFN_MAXLEN)
++  if (I > BASE_LFN_MAXLEN)
+   {
+-    I = BASE_LFN_MAXLEN - 1;
++    I = BASE_LFN_MAXLEN;
+   }
+ 
+   strncpy(FileName, Header->File.FNAME, I);

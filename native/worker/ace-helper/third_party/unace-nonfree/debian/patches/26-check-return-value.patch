@@ -1,0 +1,62 @@
+Author: Fabian Greffrath <fabian@debian.org>
+Description: Check return values of some critical functions.
+
+--- a/source/base/all/archives/ace/ace.c
++++ b/source/base/all/archives/ace/ace.c
+@@ -43,13 +43,15 @@ ULONGLONG FilePos,
+       Flags = ((PCHAR) &BASE_ARCBLK.Header.Main.ACESIGN - (PCHAR) &BASE_ARCBLK.Header);
+ 
+       BASE_DOSFUNCS_LSeek(BASE_ARCHIVES_TEST.ArchiveHandle, FilePos, SEEK_SET);
+-      read(BASE_ARCHIVES_TEST.ArchiveHandle, (PCHAR) &BASE_ARCBLK.Header, 4);
++      if (read(BASE_ARCHIVES_TEST.ArchiveHandle, (PCHAR) &BASE_ARCBLK.Header, 4) < 0)
++        return 0;
+       BASE_ARCBLK_AdjustEndiannessOfHeaderBase();  /* Adjusts .HEAD_CRC and .HEAD_SIZE */
+ 
+       if (BASE_ARCBLK.Header.Basic.HEAD_SIZE <= sizeof(BASE_ARCBLK.Header) - 4)
+       {
+-        read(BASE_ARCHIVES_TEST.ArchiveHandle, (PCHAR) &BASE_ARCBLK.Header.Basic.HEAD_TYPE,
+-                                       BASE_ARCBLK.Header.Basic.HEAD_SIZE);
++        if (read(BASE_ARCHIVES_TEST.ArchiveHandle, (PCHAR) &BASE_ARCBLK.Header.Basic.HEAD_TYPE,
++                                       BASE_ARCBLK.Header.Basic.HEAD_SIZE) < 0)
++          return 0;
+ 
+         BASE_ARCBLK_ConvertHeader32ToHeader64();
+ 
+--- a/source/base/all/dosfuncs/dosfuncs.c
++++ b/source/base/all/dosfuncs/dosfuncs.c
+@@ -48,7 +48,8 @@ INT     BASE_DOSFUNCS_GetDrive(void)
+ {
+ tLFN      Directory;
+ 
+-  getcwd(Directory, sizeof(Directory));
++  if (getcwd(Directory, sizeof(Directory)) == NULL)
++    return -1;
+ 
+   return Directory[0] >= 'a' ? Directory[0] - 'a' : Directory[0] - 'A';
+ }
+--- a/source/base/all/dosfuncs/lin.c
++++ b/source/base/all/dosfuncs/lin.c
+@@ -179,9 +179,8 @@ tLFN      Directory;
+   Directory[1] = ':';
+   Directory[2] = 0;
+ 
+-  chdir(Directory);
+-
+-  if (BASE_DOSFUNCS_GetDrive() != Drive)
++  if (chdir(Directory) < 0 ||
++      BASE_DOSFUNCS_GetDrive() != Drive)
+   {
+     BASE_ERROR.HardwareError      = 2;
+     BASE_ERROR.HardwareErrorDrive = Drive;
+--- a/source/base/all/pathfunc/pathfunc.c
++++ b/source/base/all/pathfunc/pathfunc.c
+@@ -353,7 +353,8 @@ INT       CurrentDirLen;
+           )
+        )
+   {
+-    getcwd(CurrentDir, sizeof(CurrentDir));
++    if (getcwd(CurrentDir, sizeof(CurrentDir)) == NULL)
++      return;
+     strcpy(CurrentDir, BASE_PATHFUNC_AddSlashToEnd(CurrentDir));
+ 
+ /* This is valid only under windows systems with "<drive letter>:" style file names */

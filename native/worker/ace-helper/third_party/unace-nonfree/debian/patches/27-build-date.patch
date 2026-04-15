@@ -1,0 +1,38 @@
+Author: Fabian Greffrath <fabian@debian.org>
+Description: Allow one to build reproducibly.
+
+--- a/source/apps/unace/exe/commline/commline.c
++++ b/source/apps/unace/exe/commline/commline.c
+@@ -64,7 +64,7 @@ void    APPS_UNACE_EXE_COMMLINE_Init(voi
+   {
+     sprintf(APPS_EXE_MESSAGES.FirstCommandLineHelpLine,
+             "ACE-SFX v" BASE_VERSION_VERSIONSTR "  %-42s"
+-            __DATE__ "  " __TIME__,
++            BUILD_DATE,
+             STR.Copyright_by_ACE_Compression_Software);
+ 
+     STR.CommlineHelp[3] = STR.SFXUsage;
+--- a/source/apps/unace/exe/extern/messages/messages.c
++++ b/source/apps/unace/exe/extern/messages/messages.c
+@@ -14,7 +14,7 @@ void    APPS_EXE_MESSAGES_EXTERN_InitPro
+ {
+   sprintf(APPS_EXE_MESSAGES.FirstCommandLineHelpLine,
+           "UNACE v" BASE_VERSION_VERSIONSTR "   %-44s"
+-          __DATE__ " " __TIME__
++          BUILD_DATE
+ #ifdef __MACOSX__
+           "\n(Mac OS X)     ported to the Mac by Kolja Koischwitz"
+ #endif
+--- a/source/apps/unace/exe/includes.h
++++ b/source/apps/unace/exe/includes.h
+@@ -1,6 +1,10 @@
+ #ifndef _APPS_UNACE_EXE_INCLUDES_H_INCLUDED
+ #define _APPS_UNACE_EXE_INCLUDES_H_INCLUDED
+ 
++#ifndef BUILD_DATE
++#define BUILD_DATE __DATE__ "  " __TIME__
++#endif
++
+ #include "base/all/includes.h"
+ #include "apps/exe/includes.h"
+ 

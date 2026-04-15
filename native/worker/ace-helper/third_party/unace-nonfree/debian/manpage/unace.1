@@ -1,0 +1,63 @@
+.TH unace 1 2005-12-05 "2.50" "unace manual"
+.SH NAME
+unace \- extract, test and view ACE archives
+.SH SYNOPSIS
+.B unace
+.RI < command >
+.RI [\-< sw1 >\ \&.\|.\|.\&]
+.RI < archive >
+.RI [< base_dir >\e]
+.RI [< files >/@< filelist >]
+.SH DESCRIPTION
+The
+.B unace
+utility is used for extracting, testing and viewing
+the contents of archives created with the ACE archiver.
+.SH COMMANDS
+.TP
+.B e
+Extract files
+.TP
+.B l
+List archive
+.TP
+.B t
+Test archive integrity
+.TP
+.B v
+List archive (verbose)
+.TP
+.B x
+Extract files with full path
+.SH SWITCHES
+.TP
+.BR c [\-]
+Show comments (default +)
+.TP
+.BR f [\-]
+Full path matching (default \-)
+.TP
+.B h
+Display this help and exit
+.TP
+.BR o [\-]
+Overwrite files (default \-)
+.TP
+.BR p <\fI\,pass\/\fP>
+Set password
+.TP
+.BR y [\-]
+Assume yes on all queries (default \-)
+.TP
+.BR x <\fI\,files\/\fP/@\fI\,list\/\fP>
+Exclude <\fI\,files\/\fP> or files in <\fI\,list\/\fP> from process
+.SH SEE ALSO
+.BR gzip (1),
+.BR bzip2 (1),
+.BR zip (1),
+.BR arj (1),
+.BR ppmd (1).
+.SH AUTHORS
+This manual page was written by Guillem Jover <guillem@debian.org>
+and revised by Fabian Greffrath <fabian@debian-unofficial.org>
+for the Debian project (but may be used by others).

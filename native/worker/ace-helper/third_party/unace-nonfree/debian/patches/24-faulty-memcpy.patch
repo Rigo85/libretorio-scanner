@@ -1,0 +1,14 @@
+Author: Fabian Greffrath <fabian@debian.org>
+Description: Remove a faulty `memcpy()` call which attempts to copy a `DIR`
+ to a `struct findi64_t` with the size of a pointer.
+
+--- a/source/base/all/dosfuncs/lin.c
++++ b/source/base/all/dosfuncs/lin.c
+@@ -101,7 +101,6 @@ struct dirent
+     {
+       if (BASE_PATHFUNC_WildCardCheck(Ent->d_name, Bufi64->SearchMask))
+       {
+-        memcpy(Bufi64, Dir, sizeof(Dir));
+         Bufi64->size = 0;//_filelengthi64(Dir->dd_handle);
+         strcpy(Bufi64->name, Ent->d_name);
+         *(DIR**) &Bufi64->reserved[0] = Dir;
