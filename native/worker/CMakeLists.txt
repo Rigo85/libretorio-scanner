@@ -47,6 +47,7 @@ add_executable(comic-cache-worker
 
 target_include_directories(comic-cache-worker PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip-sdk-26.00/C
     /usr/include/unrar
 )

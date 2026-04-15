@@ -37,6 +37,7 @@ set_target_properties(comic-cache-ace-helper PROPERTIES
 
 target_include_directories(comic-cache-ace-helper PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/nlohmann-json/include
 )
 
 add_dependencies(comic-cache-ace-helper comic-cache-unace-internal)
