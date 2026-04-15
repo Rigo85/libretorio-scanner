@@ -10,7 +10,6 @@ import { getStatePath, validateChunkCacheShallow } from "(src)/utils/comicCacheU
 const logger = new Logger("ArchiveDetection");
 
 const EXTENSION_BACKENDS = new Map<string, ComicArchiveFormat>([
-	[".ace", "ace"],
 	[".cba", "ace"],
 	[".cbr", "rar"],
 	[".cbz", "zip"],
@@ -19,7 +18,6 @@ const EXTENSION_BACKENDS = new Map<string, ComicArchiveFormat>([
 ]);
 
 const DIRECT_COMIC_EXTENSIONS = new Set([
-	".ace",
 	".cba",
 	".cbz",
 	".cbr",

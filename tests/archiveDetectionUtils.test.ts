@@ -89,6 +89,35 @@ describe("archiveDetectionUtils", () => {
 		expect(resolution.source).toBeUndefined();
 	});
 
+	it("rejects generic ace extensions even when the file contains valid ace magic", async () => {
+		const filePath = path.join(tempDir, "novel.ace");
+		await fs.writeFile(
+			filePath,
+			Buffer.concat([
+				Buffer.from("TJS\0\0\0"),
+				Buffer.from("**ACE**", "ascii"),
+				Buffer.alloc(32, 0)
+			])
+		);
+
+		expect(detectArchiveFormatByPathOrMagic(filePath)).toBe("ace");
+
+		const resolution = await resolveEligibleComicSource({
+			id: 1011,
+			name: "novel.ace",
+			parentPath: tempDir,
+			parentHash: "parent",
+			fileHash: "hash-ace-ebook",
+			size: "1 KB",
+			coverId: "cover-ace-ebook",
+			fileKind: FileKind.FILE
+		});
+
+		expect(resolution.result).toBe("skipped");
+		expect(resolution.reason).toBe("unsupported-format");
+		expect(resolution.source).toBeUndefined();
+	});
+
 	it("rejects declared comic extensions when magic bytes are invalid", async () => {
 		const filePath = path.join(tempDir, "issue.cbz");
 		await fs.writeFile(filePath, Buffer.from("not-an-archive"));
