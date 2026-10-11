@@ -1,0 +1,12 @@
+# A large ID3 tag can hide the first MPEG frame beyond the bounded sample.
+# This identifies a candidate only; ffprobe still validates its actual container.
+0 string ID3 ID3-tagged media candidate
+!:mime application/x-libretorio-id3
+!:strength -20
+# A real executable signature is not an ambiguous DOS COM heuristic.
+0 string MZ DOS executable
+!:mime application/x-libretorio-executable
+!:strength +100
+0 string ZM DOS executable
+!:mime application/x-libretorio-executable
+!:strength +100

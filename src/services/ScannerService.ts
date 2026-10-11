@@ -27,6 +27,7 @@ import { ComicChunkCacheService } from "(src)/services/ComicChunkCacheService";
 import { OpenLibraryService } from "(src)/services/OpenLibraryService";
 import { CacheArtifactSnapshotService } from "(src)/services/CacheArtifactSnapshotService";
 import { SpecialDirectoryArtifactService } from "(src)/services/SpecialDirectoryArtifactService";
+import { AudioMetadataService } from "(src)/services/AudioMetadataService";
 import { config } from "(src)/config/configuration";
 import { cleanupCacheBuildRoot } from "(src)/utils/comicCacheUtils";
 import {
@@ -265,6 +266,14 @@ export class ScannerService {
 				logger.info(
 					`Phase 3 — cache build complete completed="${eligibleSources.length}/${eligibleSources.length}" ready="${readyCount}" skipped="${skippedCount}" error="${errorCount}".`
 				);
+			}
+
+			if (process.env.SCAN_AUDIO_METADATA_ENABLED === "true") {
+				try {
+					await new AudioMetadataService().process([...existingDbBackedFiles, ...insertedNewFiles], scanRootPath);
+				} catch (audioError) {
+					logger.error("audio-metadata:phase-failed", audioError);
+				}
 			}
 
 			await ScanRootRepository.getInstance().updateScanRoot(JSON.stringify(scanRootResult.scan.directories), scanRoot.id);

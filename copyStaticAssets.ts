@@ -4,6 +4,7 @@ const run = (cmd: string) => execSync(cmd, {stdio: "inherit"});
 const tryRun = (cmd: string) => { try { run(cmd); } catch { /* optional resource */ } };
 
 tryRun("cp -R src/services/calibre dist/services");
+run("cp src/services/audio-candidate.magic dist/services/");
 run("mkdir -p dist/public");
 run("mkdir -p dist/native/worker");
 tryRun("cp native/worker/build/comic-cache-worker dist/native/worker/");
