@@ -92,7 +92,6 @@ export class Logger {
 	};
 }
 
-/* eslint-disable @typescript-eslint/indent */
 export const getColoredLogType = (type: LogType) => {
 	switch (type) {
 		case LogType.Init: {
@@ -115,4 +114,3 @@ export const getColoredLogType = (type: LogType) => {
 		}
 	}
 };
-/* eslint-enable @typescript-eslint/indent */

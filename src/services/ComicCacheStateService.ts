@@ -15,8 +15,8 @@ interface BaseStateInput {
 }
 
 type BaseStateOutput = Omit<
-ComicCacheState,
-"status" | "buildOutcome" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "droppedPages" | "warningCount" | "lastWarnings" | "lastError"
+	ComicCacheState,
+	"status" | "buildOutcome" | "chunkCount" | "totalPages" | "zipReady" | "chunksReady" | "droppedPages" | "warningCount" | "lastWarnings" | "lastError"
 >;
 
 export class ComicCacheStateService {

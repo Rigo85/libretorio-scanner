@@ -1,9 +1,7 @@
 // Hack to get module importing from typescript correctly translated to Node.js (CommonJS)
 const moduleAlias = require("module-alias");
-moduleAlias.addAliases({
-	"@root": __dirname + "/..",
-	"(src)": __dirname
-});
+moduleAlias.addAlias("@root", __dirname + "/..");
+moduleAlias.addAlias("(src)", __dirname);
 
 import { Request, Response, NextFunction } from "express";
 import errorHandler from "errorhandler";
