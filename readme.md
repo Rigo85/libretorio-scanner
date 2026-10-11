@@ -1,291 +1,116 @@
 # Libretorio-Scanner
 
-Servicio encargado de recorrer uno o más roots de biblioteca, contrastar el resultado con la base de datos y mantener listos los artefactos que consumen `Libretorio` y `Libretorio-ng`.
+Servicio de preparacion del catalogo de Libretorio. Recorre las raices de la
+biblioteca, contrasta disco y base de datos, extrae metadata y deja listos los
+artefactos que utilizan el backend y sus lectores.
 
-## Qué hace hoy
+La presentacion general esta en
+**[Libretorio-ng](https://github.com/Rigo85/libretorio-ng#readme)**. Este servicio
+trabaja por corridas programadas o solicitadas; no promete sincronizacion
+instantanea ante cada cambio en disco.
 
-En cada corrida:
+## Flujo del scan
 
-1. escanea el root configurado
-2. detecta carpetas especiales sin expandirlas luego como archivos normales
-3. elimina de la DB lo que ya no existe en disco
-4. completa metadata local y remota para archivos nuevos
-5. inserta en DB apenas cada archivo nuevo ya tiene la metadata necesaria
-6. genera artefactos especiales y cache comic en fases separadas
+La orquestacion vive en [ScannerService.ts](src/services/ScannerService.ts):
 
-## Flujo actual
+1. Adquiere el control de ejecucion y recorre la raiz, detectando carpetas
+   especiales sin volver a expandirlas como archivos independientes.
+2. Contrasta el catalogo con el disco y elimina registros de materiales ausentes.
+3. Obtiene metadata local y, cuando esta habilitado, consulta Open Library para
+   nuevos materiales; inserta los registros preparados.
+4. Prepara ZIP descargables para carpetas especiales y cache de comics/manga.
+5. Extrae o reutiliza metadata de audio, incluida duracion y capitulos.
+6. Actualiza el arbol, limpia cache huerfana y reconstruye el inventario de cache.
+7. Si esta habilitado, verifica y genera las conversiones PDF elegibles al final.
 
-La orquestación principal está en [ScannerService.ts](/media/work/OneDrive/Personal-Git/Libretorio/Libretorio-Scanner/src/services/ScannerService.ts).
+Redis mantiene la lease de ejecucion para evitar scans superpuestos. La fase PDF
+es secuencial; no existe una cola de conversiones independiente del scan.
 
-Fases de `scanCompareUpdate`:
+## Artefactos preparados
 
-1. `scan`
-2. contraste con DB y eliminación de ausentes
-3. `metadata + insert` de nuevos
-4. artefactos `.zip` para especiales no-comic
-5. cache comic/manga en chunks
+| Fuente | Salida o estado |
+| --- | --- |
+| Comic comprimido `cba`, `cbr`, `cbz`, `cb7`, `cbt` | Paginas agrupadas en `cache/<coverId>/<coverId>_N.cache`. |
+| Carpeta especial `COMIC-MANGA` | ZIP del original y bloques de paginas para el visor. |
+| Carpeta especial `EPUB` o `AUDIOBOOK` | ZIP descargable; no bloques de comic. |
+| Audio elegible | Metadata tecnica, duracion y capitulos en PostgreSQL. |
+| Documento convertible | PDF en `cache/<coverId>/<coverId>.pdf` y estado de conversion en PostgreSQL. |
 
-## Tipos de artefactos
+Los filtros por extension seleccionan candidatos; despues se inspecciona su
+contenido. No se considera comic cualquier ZIP/RAR generico. Un archivo `.cbr`
+con contenido ZIP se procesa con el formato detectado, no con el supuesto del
+nombre. Se admiten contenedores comic ACE, RAR, ZIP, 7z y TAR.
 
-### 1. Archivo comic comprimido
+El worker de [native/worker](native/worker) extrae, ordena y normaliza las paginas.
+TypeScript mantiene el chunking, los estados, la publicacion y el catalogo.
+La cache usa staging y promocion atomica, conserva el resultado previo si falla
+la reconstruccion y distingue resultados completos y parciales.
 
-Aplica a archivos normales declarados explícitamente como comic por extensión `cb*`.
+## Audiolibros
 
-Extensiones aceptadas:
+La seleccion inicial admite `.mp3`, `.wav`, `.m4a`, `.m4b`, `.ogg` y `.flac`.
+La deteccion de contenido precede a la extraccion con `ffprobe`: extension y
+contenedor real no tienen por que coincidir. El scanner registra resultados y
+fallos; reutiliza metadata vigente cuando no cambia la firma de la fuente ni la
+version del extractor. La ausencia de capitulos no implica que el audio sea
+invalido.
 
-- `cbr`
-- `cbz`
-- `cb7`
-- `cbt`
+El backend consulta esta informacion para las pistas y capitulos del reproductor;
+no necesita repetir esta extraccion cada vez que se abre un audiolibro.
 
-El backend real igual se valida por `magic bytes`, no solo por extensión.
+## Conversiones PDF
 
-Ejemplos soportados:
+**EPUB no participa en la conversion automatica**, ni como archivo ni como
+carpeta especial. Se mantiene su lector nativo y el ZIP de las carpetas EPUB.
 
-- `cbr` detectado como `rar`
-- `cbz` detectado como `zip`
-- `cb7` detectado como `7z`
-- `cbt` detectado como `tar`
+Los formatos actualmente seleccionados son `doc`, `docx`, `ppt`, `pptx`, `xls`,
+`xlsx`, `rtf`, `txt`, `md`, `html`, `htm` y `lit`. La lista vigente esta en
+[DocumentConversion.ts](src/models/interfaces/DocumentConversion.ts).
 
-Salida:
+- La fase se habilita con `SCAN_PDF_CONVERSIONS_ENABLED=true`; por defecto no se ejecuta.
+- Selecciona candidatos de PostgreSQL en lotes por ID, sin acumular una lista
+  adicional de todos los documentos a convertir.
+- Reutiliza PDFs validos y genera los faltantes o desactualizados. Si una fase
+  previa reconstruyo una carpeta de cache y elimino su PDF, lo vuelve a preparar.
+- Usa LibreOffice para Office/RTF, HTMLDOC para HTML y Calibre para TXT/MD/LIT.
+  Calibre procede de `src/services/calibre`, no de una instalacion elegida por PATH.
+- Ejecuta las herramientas aisladas con Bubblewrap, valida la salida y registra
+  estados `processing`, `ready` o `failed`, causas y resumen por conversor.
+- Reconcilia conversiones interrumpidas al comenzar la siguiente corrida.
+  **No reintenta indefinidamente todos los fallos**: distingue reintentables,
+  agotados y casos que necesitan intervencion.
 
-- `cache/<coverId>/<coverId>_N.cache`
+El backend solo consulta estos estados y archivos; no debe convertirse en un
+segundo escritor de la misma cache. Configuracion, limites y diagnosticos en la
+[guia de operacion](docs/operacion.md).
 
-### 2. Carpeta especial `COMIC-MANGA`
+## Preparacion y ejecucion
 
-Salida:
+Requiere Node.js `>=24.15.0 <25`, npm, PostgreSQL, Redis, almacenamiento compartido
+y las herramientas nativas indicadas en la [guia de operacion](docs/operacion.md).
+Aplicar las migraciones correspondientes de
+[Libretorio-postgresql](https://github.com/Rigo85/libretorio-postgresql) antes de
+activar audio o conversiones contra una base existente.
 
-- `cache/<coverId>/<coverId>.zip`
-- `cache/<coverId>/<coverId>_N.cache`
-
-Importante:
-
-- el `.zip` se construye desde el contenido original
-- los `_N.cache` se construyen desde páginas ya ordenadas y, si corresponde, redimensionadas
-
-### 3. Carpetas especiales `EPUB` y `AUDIOBOOK`
-
-Salida:
-
-- `cache/<coverId>/<coverId>.zip`
-
-No generan `_N.cache`.
-
-## Worker nativo
-
-La extracción y normalización de comics vive en `native/worker/`.
-
-Responsabilidades del worker:
-
-- detectar backend real por `magic bytes`
-- aceptar archivo comprimido o carpeta `COMIC-MANGA`
-- ordenar páginas y filtrar basura
-- aplicar política de redimensionamiento
-- escribir `raw/`
-- escribir `manifest.json`
-
-No hace:
-
-- chunking
-- base64
-- escritura de `_N.cache`
-- actualización de DB
-- generación del `.zip` descargable
-
-Eso sigue en TypeScript.
-
-## Política de redimensionamiento
-
-La política sigue el criterio de `Comiscopio`, pero sin miniaturas ni previews.
-
-Defaults actuales:
-
-- `SCAN_CACHE_RESIZE_ENABLED=true`
-- `SCAN_CACHE_READER_MAX_DIMENSION=2400`
-- `SCAN_CACHE_READER_QUALITY=82`
-- `SCAN_CACHE_READER_FORMAT=jpeg`
-- `SCAN_CACHE_VIPS_CONCURRENCY=1`
-
-Regla:
-
-- si `max(width, height) <= 2400`, la página hace `bypass`
-- si supera ese umbral, se redimensiona y reencodea
-- el chunking ocurre después, usando el `raw/` final
-
-## Contrato de elegibilidad comic
-
-El scanner no intenta adivinar si un comprimido genérico es comic.
-
-Entran al precalentamiento automático solo:
-
-- carpetas especiales `COMIC-MANGA`
-- archivos `cbr`, `cbz`, `cb7`, `cbt`
-
-No entran automáticamente:
-
-- `.rar`, `.zip`, `.7z`, `.tar` genéricos
-- archivos con extensión comic `cb*` cuyo `magic bytes` no correspondan a `rar|zip|7z|tar`
-
-Importante:
-
-- si un archivo está mal nombrado, la corrección esperada es manual
-- una vez renombrado correctamente a `cb*`, el próximo scan lo procesará
-- si una extensión `cb*` no coincide con su formato real, el scanner usa el backend detectado por `magic bytes`
-
-## Robustez del cache
-
-El flujo de cache actual implementa:
-
-- staging en `cache/.scanner-build/`
-- limpieza de staging residual al inicio de cada corrida
-- garbage collection final de directorios de cache huérfanos contra la lista viva de `coverId` en DB
-- validación de cache existente antes de hacer `skip`
-- promoción atómica a `cache/<coverId>/`
-- preservación del cache final previo si un rebuild falla
-- estado por item en `_scanner_state.json`
-- estado `ready` reutilizable con `buildOutcome="complete|partial"`
-- tolerancia a páginas individuales dañadas; si al menos una página válida sobrevive, la cache queda `ready` con `buildOutcome="partial"`
-
-El estado por item también se reutiliza para:
-
-- reutilizar items ya marcados como `ready` cuando el `fileHash` y el backend no cambian
-
-## Shared storage
-
-En este proyecto, `copyStaticAssets.ts` crea symlinks hacia storage compartido:
-
-- libros: `/media/RIGO7/BACKUP/LIBROS`
-- covers: `/media/RIGO7/Libretorio-conf/covers`
-- cache: `/media/RIGO7/Libretorio-conf/cache`
-- temp covers: `/media/RIGO7/Libretorio-conf/temp_covers`
-
-Referencia: [copyStaticAssets.ts](/media/work/OneDrive/Personal-Git/Libretorio/Libretorio-Scanner/copyStaticAssets.ts)
-
-Si el host de producción usa otras rutas, este archivo debe ajustarse antes del despliegue.
-
-## Scripts útiles
-
-Desde [package.json](/media/work/OneDrive/Personal-Git/Libretorio/Libretorio-Scanner/package.json):
-
-- `npm test -- --runInBand`
-- `npm run build`
-- `npm run build-native-worker`
-- `npm run clean:native-worker`
-- `npm run serve`
-
-## Dependencias de producción
-
-### Si vas a compilar el worker nativo en producción
+**Antes de `npm ci`**, revisar [copyStaticAssets.ts](copyStaticAssets.ts): el
+`postinstall` compila el worker y crea enlaces a rutas concretas del host. Preparar
+las dependencias, la configuracion y el almacenamiento antes de instalar o arrancar.
 
 ```bash
-sudo apt update
-sudo apt install -y \
-  nodejs \
-  npm \
-  build-essential \
-  cmake \
-  pkg-config \
-  libarchive-dev \
-  libvips-dev \
-  libunrar-dev \
-  libunrar-headers
-```
-
-### Si vas a copiar el binario ya compilado y solo ejecutar el scanner
-
-```bash
-sudo apt update
-sudo apt install -y \
-  nodejs \
-  npm \
-  libarchive13t64 \
-  libvips42t64 \
-  libunrar5t64
-```
-
-Opcional, recomendado como red de seguridad para el fallback legacy de RAR:
-
-```bash
-sudo apt install -y unrar
-```
-
-Notas:
-
-- el proyecto declara `Node >=24.15.0 <25`; usar el runtime Node 24 acordado para estos servicios
-- `7z` no hace falta instalarlo por `apt`; el proyecto usa `7zip-bin` desde `node_modules`
-
-## Verificación mínima
-
-Antes de desplegar:
-
-```bash
+npm ci
 npm test -- --runInBand
 npm run build
+npm run serve
 ```
 
-Al momento de actualizar este documento, ambas verificaciones pasan en el estado actual del proyecto.
+El servicio programa scans segun `CRON_SCHEDULE`; arrancarlo no es una operacion
+de solo lectura. Usar una base y una biblioteca aisladas para pruebas.
+No exponer su puerto HTTP a Internet: sus rutas operativas no utilizan las
+sesiones de usuario del backend.
 
-## Conversiones PDF al final del scan
+## Documentacion y licencia
 
-La fase nueva esta implementada y probada localmente, pero **desactivada por defecto**.
-Se activa exclusivamente con `SCAN_PDF_CONVERSIONS_ENABLED=true`, despues de aplicar
-la migracion `Libretorio-postgresql/20260928_document_conversions.sql`, validar los
-conversores bajo el usuario del servicio y coordinar que el backend deje de convertir.
-No activar dos escritores sobre los mismos PDFs.
-
-- Consulta `archive` por `scan_root_id` en lotes de 50, con cursor por ID; no carga todos los candidatos en memoria.
-- Ejecuta una conversion a la vez, dentro del scan y despues de ZIP, comics, audio, GC y snapshot.
-- Conserva `cache/<coverId>/<coverId>.pdf`. Si el ZIP reconstruido elimino el PDF, esta fase lo regenera.
-- Usa Calibre del proyecto (`src/services/calibre`, copiado a `dist/services/calibre`), LibreOffice o HTMLDOC.
-- Requiere Linux, Bubblewrap, prlimit, file y pdfinfo; la recuperacion sintactica requiere tambien qpdf y pdftotext. Si falla el aislamiento, no ejecuta un fallback sin proteccion.
-- Registra estados en `document_conversions`, resumen por corrida en `document_conversion_runs` y logs `pdf-conversion:*`.
-- Respalda los PDFs sin procedencia como archivos `cache/<coverId>.legacy-<sha256>.pdf`, antes de reemplazarlos.
-
-**Antes del primer scan habilitado, respaldar los dos PDFs heredados identificados**:
-la fase previa de ZIP podria eliminarlos antes de llegar a la fase PDF. El respaldo
-automatico final conserva los que sobreviven hasta ese punto; no sustituye ese respaldo previo.
-
-Configuracion opcional:
-
-| Variable | Predeterminado |
-| --- | --- |
-| `PDF_CONVERSION_BATCH_SIZE` | 50, maximo 500 |
-| `PDF_CONVERSION_TIMEOUT_MS` | 900000 por conversion |
-| `PDF_CONVERSION_MEMORY_BYTES` | 2147483648, suma de RSS muestreada cada 250 ms |
-| `PDF_CONVERSION_CALIBRE_MEMORY_BYTES` | 6442450944, limite RSS especifico de Calibre |
-| `PDF_CONVERSION_ADDRESS_SPACE_BYTES` | 1099511627776 por proceso, memoria virtual |
-| `PDF_CONVERSION_CPU_SECONDS` | 900 por proceso |
-| `PDF_CONVERSION_MAX_BYTES` | 4294967296 por archivo de salida |
-| `PDF_CONVERSION_DIAGNOSTICS_DIR` | `logs/pdf-conversions` del proyecto, fuera de la cache |
-
-El monitor RSS no es un limite duro de cgroup: puede haber picos entre muestras y
-las paginas compartidas pueden contarse varias veces. El limite de espacio virtual
-es distinto; fijarlo en 2 u 8 GiB hizo fallar Calibre en las pruebas reales.
-Calibre dispone de 2048 descriptores por proceso; las otras herramientas conservan 256.
-
-La receta `libretorio-pdf-v2` prepara los EPUB en carpeta a partir del ZIP existente,
-verificando contenido contra la fuente. Si falta o esta desactualizado, reutiliza
-el generador de ZIP y reemplaza solo ese archivo, no su carpeta de cache. Calibre
-recibe una copia temporal `.epub`; los originales permanecen de solo lectura.
-Para errores PoDoFo comprobados se intenta recuperar la portada a PNG sin cambiar
-sus pixeles. Para dos errores sintacticos conocidos se intenta normalizar con
-qpdf, comprobando paginas y texto; no se reparan PDFs ya publicados en sitio.
-Los diagnosticos acotados por item se conservan en
-`<PDF_CONVERSION_DIAGNOSTICS_DIR>/<run>/<archiveId>.json`, incluso tras eliminar
-los temporales de conversion o comenzar otro scan. No configurar esta ruta dentro
-de `.scanner-build` ni de una carpeta publica. Recursos omitidos detectados
-impiden publicar el PDF.
-
-Los fallos de documentos permiten continuar. Los fallos de PostgreSQL, almacenamiento,
-aislamiento o lease detienen la fase. `timeout`, fuente modificada o archivo ausente
-tienen espera de una hora y hasta tres intentos por firma/receta; errores permanentes
-se difieren hasta que cambie la fuente/receta o se autorice un reintento dirigido.
-Al comenzar una nueva fase con la lease adquirida, los estados `processing` de
-la misma raiz se reconcilian para permitir reintento; se conserva el digest que
-permite recuperar una publicacion interrumpida. Un intento de escritura sobre
-`/input` protegido es fallo del documento, no prueba de averia del disco del host.
-
-Pruebas y restricciones de la implementacion inicial:
-[resultado-conversiones-pdf-local-2026-09-28.md](../resultado-conversiones-pdf-local-2026-09-28.md).
-Revision v2, correcciones, respaldo, limpieza y despliegue del 30/09:
-[revision-cruzada-conversiones-2026-09-30.md](../revision-cruzada-conversiones-2026-09-30.md).
+- [Configuracion, dependencias, cache y seguimiento de corridas](docs/operacion.md).
+- [Notas historicas conservadas del README anterior](docs/notas-implementacion-historicas.md).
+- [Backend consumidor](https://github.com/Rigo85/libretorio#readme).
+- [Licencia AGPL v3](LICENSE.txt). Los componentes de terceros tienen sus propias licencias.

@@ -1,7 +1,7 @@
 {
     "name": "libretorio-scanner",
     "version": "1.0.0",
-    "description": "This service monitors a directory for changes and updates the database accordingly, ensuring real-time synchronization and data accuracy.",
+    "description": "Scanner de Libretorio: sincroniza el catalogo con el disco y prepara metadata, cache de comics, capitulos de audio y conversiones PDF.",
     "scripts": {
         "test": "jest",
         "start": "npm run serve",
