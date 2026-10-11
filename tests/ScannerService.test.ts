@@ -11,14 +11,23 @@ import { CacheArtifactSnapshotService } from "(src)/services/CacheArtifactSnapsh
 import { ComicChunkCacheService } from "(src)/services/ComicChunkCacheService";
 import { ScannerService } from "(src)/services/ScannerService";
 import { SpecialDirectoryArtifactService } from "(src)/services/SpecialDirectoryArtifactService";
+import { AudioMetadataService } from "(src)/services/AudioMetadataService";
+import { DocumentConversionService } from "(src)/services/DocumentConversionService";
+import { ScannerCacheService } from "(src)/services/ScannerCacheService";
 import * as comicCacheUtils from "(src)/utils/comicCacheUtils";
 
 describe("ScannerService orchestration", () => {
 	let scanner: ScannerService;
 	let originalCachePath: string;
+	let originalAudioFlag: string | undefined;
+	let originalPdfFlag: string | undefined;
 	const tempCacheRoots: string[] = [];
 
 	beforeEach(() => {
+		originalPdfFlag = process.env.SCAN_PDF_CONVERSIONS_ENABLED;
+		delete process.env.SCAN_PDF_CONVERSIONS_ENABLED;
+		originalAudioFlag = process.env.SCAN_AUDIO_METADATA_ENABLED;
+		delete process.env.SCAN_AUDIO_METADATA_ENABLED;
 		scanner = ScannerService.getInstance();
 		originalCachePath = config.production.paths.cache;
 		jest.spyOn(CacheArtifactSnapshotService.getInstance(), "rebuildSnapshotFromCache").mockResolvedValue({
@@ -35,6 +44,10 @@ describe("ScannerService orchestration", () => {
 	});
 
 	afterEach(async () => {
+		if (originalPdfFlag === undefined) delete process.env.SCAN_PDF_CONVERSIONS_ENABLED;
+		else process.env.SCAN_PDF_CONVERSIONS_ENABLED = originalPdfFlag;
+		if (originalAudioFlag === undefined) delete process.env.SCAN_AUDIO_METADATA_ENABLED;
+		else process.env.SCAN_AUDIO_METADATA_ENABLED = originalAudioFlag;
 		config.production.paths.cache = originalCachePath;
 		jest.restoreAllMocks();
 		while (tempCacheRoots.length) {
@@ -42,7 +55,13 @@ describe("ScannerService orchestration", () => {
 		}
 	});
 
-	it("logs cache candidate resolution progress when there are no new files", async () => {
+	it.each(["disabled", "enabled", "failed"])("preserves existing phases with audio %s and no new files", async mode => {
+		if (mode !== "disabled") process.env.SCAN_AUDIO_METADATA_ENABLED = "true";
+		const audio = jest.spyOn(AudioMetadataService.prototype, "process").mockResolvedValue({
+			archives: 0, checked: 0, extensionSkipped: 0, headersInspected: 0, detected: 0, extracted: 0, reusedOrDeferred: 0,
+			withoutChapters: 0, review: 0, skipped: 0, skippedReused: 0, failed: 0
+		});
+		if (mode === "failed") audio.mockRejectedValue(new Error("Synthetic extraction phase failure"));
 		const existingComicFile = {
 			id: 21,
 			name: "backlog.cbz",
@@ -84,6 +103,9 @@ describe("ScannerService orchestration", () => {
 		}]);
 
 		await scanner.scanCompareUpdate("/library");
+		if (mode === "disabled") expect(audio).not.toHaveBeenCalled();
+		else expect(audio).toHaveBeenCalledWith([existingComicFile], "/library");
+		expect(ScanRootRepository.getInstance().updateScanRoot).toHaveBeenCalled();
 
 		const joinedLogs = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
 		expect(joinedLogs).toContain("Phase 1 complete completed=\"0/0\" metadataCompleted=\"0\" inserted=\"0\" failed=\"0\".");
@@ -402,5 +424,31 @@ describe("ScannerService orchestration", () => {
 		expect(joinedLogs).toContain("cacheSnapshotZipOnly=\"1\"");
 		expect(joinedLogs).toContain("cacheSnapshotLegacy=\"1\"");
 		expect(joinedLogs).toContain("cacheSnapshotPublished=\"true\"");
+	});
+
+	it.each(["disabled", "enabled", "failure"])("runs PDF phase last, with database root instead of archive arrays: %s", async mode => {
+		if (mode !== "disabled") process.env.SCAN_PDF_CONVERSIONS_ENABLED = "true";
+		const signal = new AbortController().signal;
+		jest.spyOn(ScannerCacheService, "getInstance").mockReturnValue({signal, assertLease: async () => {}} as any);
+		jest.spyOn(ScanRootRepository.getInstance(), "getScanRootByPath").mockResolvedValue({id: 5, path: "/library"} as never);
+		jest.spyOn(comicCacheUtils, "cleanupCacheBuildRoot").mockResolvedValue(0);
+		jest.spyOn(scanner, "scan").mockResolvedValue({root: "/library", scan: {
+			directories: {name: "library", hash: "root", directories: []}, files: []
+		}});
+		jest.spyOn(FileRepository.getInstance(), "removeFileByParentHash").mockResolvedValue(0);
+		jest.spyOn(FileRepository.getInstance(), "getFilesForCacheBuild").mockResolvedValue([]);
+		jest.spyOn(FileRepository.getInstance(), "getAllCoverIds").mockResolvedValue([]);
+		jest.spyOn(ScanRootRepository.getInstance(), "updateScanRoot").mockResolvedValue(undefined as never);
+		const conversion = jest.spyOn(DocumentConversionService, "run").mockResolvedValue({total: 0, checked: 0,
+			reused: 0, recovered: 0, converted: 0, failed: 0, deferred: 0, tools: {}});
+		if (mode === "failure") conversion.mockRejectedValue(new Error("PDF phase SQL failure"));
+		if (mode === "failure") await expect(scanner.scanCompareUpdate("/library")).rejects.toThrow("PDF phase SQL failure");
+		else await scanner.scanCompareUpdate("/library");
+		if (mode === "disabled") expect(conversion).not.toHaveBeenCalled();
+		else {
+			expect(conversion).toHaveBeenCalledWith(5, "/library", expect.any(Function), signal);
+			const snapshot = CacheArtifactSnapshotService.getInstance().rebuildSnapshotFromCache as any;
+			expect(snapshot.mock.invocationCallOrder[0]).toBeLessThan(conversion.mock.invocationCallOrder[0]);
+		}
 	});
 });

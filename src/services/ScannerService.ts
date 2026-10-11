@@ -28,6 +28,8 @@ import { OpenLibraryService } from "(src)/services/OpenLibraryService";
 import { CacheArtifactSnapshotService } from "(src)/services/CacheArtifactSnapshotService";
 import { SpecialDirectoryArtifactService } from "(src)/services/SpecialDirectoryArtifactService";
 import { AudioMetadataService } from "(src)/services/AudioMetadataService";
+import { DocumentConversionService } from "(src)/services/DocumentConversionService";
+import { ScannerCacheService } from "(src)/services/ScannerCacheService";
 import { config } from "(src)/config/configuration";
 import { cleanupCacheBuildRoot } from "(src)/utils/comicCacheUtils";
 import {
@@ -112,6 +114,7 @@ export class ScannerService {
 	public async scanCompareUpdate(scanRootPath: string) {
 		logger.info(`scanCompareUpdate for path: "${scanRootPath}".`);
 		const scanStartedAt = Date.now();
+		let conversionPhaseStarted = false;
 
 		try {
 			const scanRoot = await ScanRootRepository.getInstance().getScanRootByPath(scanRootPath);
@@ -280,6 +283,11 @@ export class ScannerService {
 			const cacheGcSummary = await this.runCacheGarbageCollection();
 			const cacheArtifactSnapshotSummary: CacheArtifactSnapshotSummary =
 				await CacheArtifactSnapshotService.getInstance().rebuildSnapshotFromCache();
+			if (process.env.SCAN_PDF_CONVERSIONS_ENABLED === "true") {
+				conversionPhaseStarted = true;
+				const lease = ScannerCacheService.getInstance();
+				await DocumentConversionService.run(scanRoot.id, scanRootPath, () => lease.assertLease(), lease.signal);
+			}
 			logger.info(
 				`scanCompareUpdate summary scanRoot="${scanRootPath}" newFiles="${newFiles.length}" inserted="${insertedNewFiles.length}" ` +
 				`specialZipReady="${specialArtifactReadyCount}" specialZipSkipped="${specialArtifactSkippedCount}" specialZipError="${specialArtifactErrorCount}" ` +
@@ -293,6 +301,7 @@ export class ScannerService {
 			);
 		} catch (error) {
 			logger.error(`scanCompareUpdate "${scanRootPath}":`, error.message);
+			if (conversionPhaseStarted) throw error;
 		}
 	}
 

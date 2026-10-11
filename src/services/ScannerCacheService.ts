@@ -18,7 +18,24 @@ type ScannerCacheState = {
 export class ScannerCacheService {
 	private static instance: ScannerCacheService;
 	private heartbeatTimer?: NodeJS.Timeout;
+	private expiryTimer?: NodeJS.Timeout;
 	private leaseToken?: string;
+	private controller = new AbortController();
+
+	public get signal(): AbortSignal {
+		return this.controller.signal;
+	}
+
+	public async assertLease(): Promise<void> {
+		if (this.controller.signal.aborted || !this.leaseToken) throw new Error("Scanner lease unavailable");
+		try {
+			const current = await RedisCacheService.getInstance().get(HEARTBEAT_KEY);
+			if (current !== this.leaseToken) throw new Error("Scanner lease ownership lost");
+		} catch (error) {
+			this.controller.abort();
+			throw error;
+		}
+	}
 
 	private constructor() {
 		this.initializeState().catch((error: any) => logger.error("Error initializing scanner cache state:", error));
@@ -43,6 +60,7 @@ export class ScannerCacheService {
 
 	public async tryAcquireLease(): Promise<boolean> {
 		try {
+			const requestedAt = Date.now();
 			const leaseToken = randomUUID();
 			const acquired = await RedisCacheService.getInstance().setIfNotExists(HEARTBEAT_KEY, leaseToken, HEARTBEAT_TTL_S);
 			if (!acquired) {
@@ -50,6 +68,8 @@ export class ScannerCacheService {
 			}
 
 			this.leaseToken = leaseToken;
+			this.controller = new AbortController();
+			this.armExpiry(requestedAt);
 			await this.setRunning(true);
 			await this.renewHeartbeat();
 
@@ -58,7 +78,10 @@ export class ScannerCacheService {
 			}
 
 			this.heartbeatTimer = setInterval(() => {
-				this.renewHeartbeat().catch((err: any) => logger.error("heartbeat renew error:", err));
+				this.renewHeartbeat().catch((err: any) => {
+					this.controller.abort();
+					logger.error("heartbeat renew error:", err);
+				});
 			}, HEARTBEAT_INTERVAL_MS);
 
 			logger.info("Scanner lease acquired.");
@@ -70,6 +93,8 @@ export class ScannerCacheService {
 	}
 
 	public async releaseLease(): Promise<void> {
+		this.controller.abort();
+		if (this.expiryTimer) clearTimeout(this.expiryTimer);
 		try {
 			if (this.heartbeatTimer) {
 				clearInterval(this.heartbeatTimer);
@@ -158,8 +183,11 @@ export class ScannerCacheService {
 			return;
 		}
 
+		const requestedAt = Date.now();
 		const renewed = await RedisCacheService.getInstance().compareAndExpire(HEARTBEAT_KEY, leaseToken, HEARTBEAT_TTL_S);
+		if (renewed && this.leaseToken === leaseToken && !this.controller.signal.aborted) this.armExpiry(requestedAt);
 		if (!renewed) {
+			this.controller.abort();
 			logger.error("Scanner lease lost before renewal.");
 			if (this.heartbeatTimer) {
 				clearInterval(this.heartbeatTimer);
@@ -172,6 +200,16 @@ export class ScannerCacheService {
 				await this.setRunning(false);
 			}
 		}
+	}
+
+	private armExpiry(requestedAt: number): void {
+		if (this.expiryTimer) clearTimeout(this.expiryTimer);
+		// Redis may queue a request while disconnected; stop PDF work before the server lease can expire.
+		this.expiryTimer = setTimeout(() => {
+			this.controller.abort();
+			logger.error("Scanner lease renewal deadline exceeded; PDF work cancelled.");
+		}, Math.max(0, requestedAt + HEARTBEAT_TTL_S * 1000 - 5000 - Date.now()));
+		this.expiryTimer.unref();
 	}
 
 	private async readState(): Promise<ScannerCacheState> {

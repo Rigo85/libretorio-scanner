@@ -12,6 +12,7 @@ import { bootstrap } from "(src)/app";
 import { PostgresAdapter } from "(src)/db/PostgresAdapter";
 import { config } from "(src)/config/configuration";
 import { ScannerCacheService } from "(src)/services/ScannerCacheService";
+import { DocumentConversionService } from "(src)/services/DocumentConversionService";
 
 async function fullServerStart() {
 	const app = await bootstrap();
@@ -32,6 +33,7 @@ async function fullServerStart() {
 		}, 10000);
 
 		try {
+			await DocumentConversionService.stopActive();
 			await ScannerCacheService.getInstance().shutdown();
 
 			const dbService = PostgresAdapter.getInstance();
