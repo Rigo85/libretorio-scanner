@@ -211,7 +211,7 @@ sudo apt install -y unrar
 
 Notas:
 
-- el proyecto declara `Node 20.x`
+- el proyecto declara `Node >=24.15.0 <25`; usar el runtime Node 24 acordado para estos servicios
 - `7z` no hace falta instalarlo por `apt`; el proyecto usa `7zip-bin` desde `node_modules`
 
 ## Verificación mínima
@@ -224,3 +224,68 @@ npm run build
 ```
 
 Al momento de actualizar este documento, ambas verificaciones pasan en el estado actual del proyecto.
+
+## Conversiones PDF al final del scan
+
+La fase nueva esta implementada y probada localmente, pero **desactivada por defecto**.
+Se activa exclusivamente con `SCAN_PDF_CONVERSIONS_ENABLED=true`, despues de aplicar
+la migracion `Libretorio-postgresql/20260928_document_conversions.sql`, validar los
+conversores bajo el usuario del servicio y coordinar que el backend deje de convertir.
+No activar dos escritores sobre los mismos PDFs.
+
+- Consulta `archive` por `scan_root_id` en lotes de 50, con cursor por ID; no carga todos los candidatos en memoria.
+- Ejecuta una conversion a la vez, dentro del scan y despues de ZIP, comics, audio, GC y snapshot.
+- Conserva `cache/<coverId>/<coverId>.pdf`. Si el ZIP reconstruido elimino el PDF, esta fase lo regenera.
+- Usa Calibre del proyecto (`src/services/calibre`, copiado a `dist/services/calibre`), LibreOffice o HTMLDOC.
+- Requiere Linux, Bubblewrap, prlimit, file y pdfinfo; la recuperacion sintactica requiere tambien qpdf y pdftotext. Si falla el aislamiento, no ejecuta un fallback sin proteccion.
+- Registra estados en `document_conversions`, resumen por corrida en `document_conversion_runs` y logs `pdf-conversion:*`.
+- Respalda los PDFs sin procedencia como archivos `cache/<coverId>.legacy-<sha256>.pdf`, antes de reemplazarlos.
+
+**Antes del primer scan habilitado, respaldar los dos PDFs heredados identificados**:
+la fase previa de ZIP podria eliminarlos antes de llegar a la fase PDF. El respaldo
+automatico final conserva los que sobreviven hasta ese punto; no sustituye ese respaldo previo.
+
+Configuracion opcional:
+
+| Variable | Predeterminado |
+| --- | --- |
+| `PDF_CONVERSION_BATCH_SIZE` | 50, maximo 500 |
+| `PDF_CONVERSION_TIMEOUT_MS` | 900000 por conversion |
+| `PDF_CONVERSION_MEMORY_BYTES` | 2147483648, suma de RSS muestreada cada 250 ms |
+| `PDF_CONVERSION_CALIBRE_MEMORY_BYTES` | 6442450944, limite RSS especifico de Calibre |
+| `PDF_CONVERSION_ADDRESS_SPACE_BYTES` | 1099511627776 por proceso, memoria virtual |
+| `PDF_CONVERSION_CPU_SECONDS` | 900 por proceso |
+| `PDF_CONVERSION_MAX_BYTES` | 4294967296 por archivo de salida |
+| `PDF_CONVERSION_DIAGNOSTICS_DIR` | `logs/pdf-conversions` del proyecto, fuera de la cache |
+
+El monitor RSS no es un limite duro de cgroup: puede haber picos entre muestras y
+las paginas compartidas pueden contarse varias veces. El limite de espacio virtual
+es distinto; fijarlo en 2 u 8 GiB hizo fallar Calibre en las pruebas reales.
+Calibre dispone de 2048 descriptores por proceso; las otras herramientas conservan 256.
+
+La receta `libretorio-pdf-v2` prepara los EPUB en carpeta a partir del ZIP existente,
+verificando contenido contra la fuente. Si falta o esta desactualizado, reutiliza
+el generador de ZIP y reemplaza solo ese archivo, no su carpeta de cache. Calibre
+recibe una copia temporal `.epub`; los originales permanecen de solo lectura.
+Para errores PoDoFo comprobados se intenta recuperar la portada a PNG sin cambiar
+sus pixeles. Para dos errores sintacticos conocidos se intenta normalizar con
+qpdf, comprobando paginas y texto; no se reparan PDFs ya publicados en sitio.
+Los diagnosticos acotados por item se conservan en
+`<PDF_CONVERSION_DIAGNOSTICS_DIR>/<run>/<archiveId>.json`, incluso tras eliminar
+los temporales de conversion o comenzar otro scan. No configurar esta ruta dentro
+de `.scanner-build` ni de una carpeta publica. Recursos omitidos detectados
+impiden publicar el PDF.
+
+Los fallos de documentos permiten continuar. Los fallos de PostgreSQL, almacenamiento,
+aislamiento o lease detienen la fase. `timeout`, fuente modificada o archivo ausente
+tienen espera de una hora y hasta tres intentos por firma/receta; errores permanentes
+se difieren hasta que cambie la fuente/receta o se autorice un reintento dirigido.
+Al comenzar una nueva fase con la lease adquirida, los estados `processing` de
+la misma raiz se reconcilian para permitir reintento; se conserva el digest que
+permite recuperar una publicacion interrumpida. Un intento de escritura sobre
+`/input` protegido es fallo del documento, no prueba de averia del disco del host.
+
+Pruebas y restricciones de la implementacion inicial:
+[resultado-conversiones-pdf-local-2026-09-28.md](../resultado-conversiones-pdf-local-2026-09-28.md).
+Revision v2, correcciones, respaldo, limpieza y despliegue del 30/09:
+[revision-cruzada-conversiones-2026-09-30.md](../revision-cruzada-conversiones-2026-09-30.md).
