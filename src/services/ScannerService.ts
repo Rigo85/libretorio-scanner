@@ -352,7 +352,9 @@ export class ScannerService {
 				} else {
 					const subdirResult = await this.getStructureAndFiles(entryPath, subEntries, progress);
 					structure.directories.push(subdirResult.directories);
-					filesList.push(...subdirResult.files);
+					for (const file of subdirResult.files) {
+						filesList.push(file);
+					}
 				}
 			} else if (entry.isFile()) {
 				const stats = await fs.stat(entryPath);

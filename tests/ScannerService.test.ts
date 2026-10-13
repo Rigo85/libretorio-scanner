@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 
 import { config } from "(src)/config/configuration";
 import { FileKind } from "(src)/models/interfaces/File";
+import { ScanResult } from "(src)/models/interfaces/ScanResult";
 import { FileRepository } from "(src)/repositories/FileRepository";
 import { ScanRootRepository } from "(src)/repositories/ScanRootRepository";
 import { CacheArtifactSnapshotService } from "(src)/services/CacheArtifactSnapshotService";
@@ -41,6 +42,23 @@ describe("ScannerService orchestration", () => {
 			published: true,
 			elapsedMs: 0
 		});
+	});
+
+	it.each([0, 3, 200000])("preserves child file order and references when merging %i files", async count => {
+		const files = Array.from({length: count}, (_, index) => ({
+			name: `book-${index}.epub`, parentPath: "/library/child", parentHash: "child-hash",
+			fileHash: `hash-${index}`, size: "1 KB", coverId: `cover-${index}`, fileKind: FileKind.FILE
+		}));
+		const child: ScanResult = {directories: {name: "child", hash: "child-hash", directories: []}, files};
+		const internal = scanner as any;
+		const walk = internal.getStructureAndFiles.bind(scanner);
+		jest.spyOn(internal, "getStructureAndFiles").mockResolvedValue(child);
+		jest.spyOn(internal, "detectSpecialDirectory").mockResolvedValue(FileKind.NONE);
+		jest.spyOn(fs, "readdir").mockResolvedValue([] as never);
+		const result = await walk("/library", [{name: "child", isDirectory: () => true}]);
+		expect(result.directories.directories).toEqual([child.directories]);
+		expect(result.files).toHaveLength(count);
+		expect(result.files.every((file: unknown, index: number) => file === files[index])).toBe(true);
 	});
 
 	afterEach(async () => {
