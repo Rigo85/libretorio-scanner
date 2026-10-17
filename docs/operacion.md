@@ -108,3 +108,29 @@ Se intenta recuperar solo los errores conocidos de la receta y se valida la
 salida antes de publicarla. `ready` indica que paso esas comprobaciones, no una
 garantia de fidelidad visual pagina por pagina. Mantener revisiones de muestras
 de PDFs tras cambios en herramientas o politica, sin regenerar todo por defecto.
+
+### Indices HTML masivos: revision aplazada (2026-10-16)
+
+Decision del usuario: `indice_autor.html` e `indice_titulo.html`, de
+`Biblioteca Ebooks Espanol 2026 (epub)`, son casos extremos y no necesitan PDF.
+Se acepta por ahora el comportamiento del scanner. Esta decision no implica
+marcarlos como `ready`, excluirlos mediante codigo ni modificar sus registros.
+No cambiar conversores, limites, inspeccion de recursos o politica de reintentos
+para resolver estos dos casos; retomar solo si aparece una necesidad real.
+
+La inspeccion actual recorre la carpeta como recursos del HTML y supera el limite
+de 50.000 entradas antes de convertir. Las pruebas locales directas con CLI
+evaluaron aparte el coste y la fidelidad de los conversores:
+
+- WeasyPrint 70 completo el indice por titulo, preparado en bloques, en 269 s:
+  3.155 paginas y aproximadamente 3,7 GiB de pico del contenedor. Se recuperaron
+  las 152.080 entradas, pero hubo un defecto de diacriticos en un nombre.
+- Chromium 155 agoto el limite de 4 GiB con esa variante, sin generar PDF.
+- Ambos motores convirtieron una muestra de 1.044 entradas; ese resultado no
+  demuestra viabilidad para los indices completos. Los limites Docker de estas
+  pruebas no equivalen al control RSS del scanner.
+
+Evidencia local, fuera del repositorio del servicio:
+`../local-pdf/html-index-review-20261016/cli-output/` (desde la carpeta del repo).
+La conversion por partes y union posterior quedo como idea sin implementar ni
+validar. No se desplegaron herramientas ni cambios del scanner por estas pruebas.
