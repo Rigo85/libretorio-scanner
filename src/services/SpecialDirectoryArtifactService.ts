@@ -8,11 +8,12 @@ import {
 	cleanupStagingDir,
 	generateDirectoryZipArtifact,
 	getZipPath,
-	promoteStagingCache,
-	validateZipArtifact,
 	ZipArtifactProgress
 } from "(src)/utils/comicCacheUtils";
 import { humanFileSize } from "(src)/utils/fileUtils";
+import {
+	adoptLegacySpecialZip, checkSpecialZip, inspectSpecialZipSource, publishSpecialZip, specialZipMatchesSource
+} from "(src)/utils/specialZipState";
 
 const logger = new Logger("SpecialDirectoryArtifact");
 
@@ -22,6 +23,8 @@ export interface SpecialDirectoryArtifactResult {
 	size?: string;
 	zipPath?: string;
 	error?: string;
+	reason?: string;
+	action?: "created" | "rebuilt" | "reused" | "adopted";
 	elapsedMs: number;
 }
 
@@ -59,6 +62,7 @@ export class SpecialDirectoryArtifactService {
 		let readyCount = 0;
 		let skippedCount = 0;
 		let errorCount = 0;
+		const actions = {created: 0, rebuilt: 0, reused: 0, adopted: 0};
 
 		const worker = async (): Promise<void> => {
 			while (pointer < uniqueFiles.length) {
@@ -70,6 +74,7 @@ export class SpecialDirectoryArtifactService {
 				} satisfies ArtifactProgressContext;
 				const result = await this.ensureArtifactForFileInternal(file, progress);
 				results.push(result);
+				if (result.action) actions[result.action]++;
 				completed++;
 
 				if (result.status === "ready") {
@@ -87,6 +92,7 @@ export class SpecialDirectoryArtifactService {
 		};
 
 		await Promise.all(Array.from({length: Math.min(concurrency, uniqueFiles.length)}, worker));
+		logger.info(`artifact-summary created="${actions.created}" rebuilt="${actions.rebuilt}" reused="${actions.reused}" adopted="${actions.adopted}" error="${errorCount}".`);
 		return results;
 	}
 
@@ -111,16 +117,23 @@ export class SpecialDirectoryArtifactService {
 			};
 		}
 
+		let reason = "source-inspection";
 		try {
-			if (await validateZipArtifact(zipPath)) {
+			const source = await inspectSpecialZipSource(sourcePath);
+			const check = await checkSpecialZip(zipPath, source);
+			reason = check.reason;
+			if (check.reuse) {
+				if (check.legacy) await adoptLegacySpecialZip(zipPath, sourcePath, source);
 				const stats = await fs.stat(zipPath);
 				const size = humanFileSize(stats.size, true);
 				await this.updateSpecialDirectorySizeIfNeeded(file, size);
-				logger.info(`artifact-skip-ready ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" path="${sourcePath}".`);
+				logger.info(`artifact-skip-ready ${itemProgress}reason="${reason}" coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" path="${sourcePath}".`);
 
 				return {
 					coverId: file.coverId,
 					status: "skipped",
+					reason,
+					action: check.legacy ? "adopted" : "reused",
 					size,
 					zipPath,
 					elapsedMs: Date.now() - start
@@ -128,7 +141,7 @@ export class SpecialDirectoryArtifactService {
 			}
 
 			if (await fs.pathExists(zipPath)) {
-				logger.info(`artifact-rebuild-invalid ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}".`);
+				logger.info(`artifact-rebuild-required ${itemProgress}reason="${reason}" coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}".`);
 			}
 
 			const stagingDir = await createCacheStagingDir(file.coverId);
@@ -138,6 +151,7 @@ export class SpecialDirectoryArtifactService {
 				let lastEntriesProcessed = 0;
 				let lastBytesProcessed = 0;
 				const zipResult = await generateDirectoryZipArtifact(sourcePath, file.coverId, stagingDir, {
+					failOnWarning: true,
 					onProgress: async (zipProgress) => {
 						if (!this.shouldLogZipProgress(zipProgress, lastEntriesProcessed, lastBytesProcessed)) {
 							return;
@@ -150,32 +164,37 @@ export class SpecialDirectoryArtifactService {
 						);
 					}
 				});
-				if (!(await validateZipArtifact(zipResult.zipPath))) {
-					throw new Error(`Generated zip artifact is invalid for "${sourcePath}".`);
+				if (!(await specialZipMatchesSource(zipResult.zipPath, source))) {
+					throw new Error(`Generated ZIP does not match source inventory: "${sourcePath}".`);
 				}
 
-				await promoteStagingCache(file.coverId, stagingDir);
+				if ((await inspectSpecialZipSource(sourcePath)).signature !== source.signature) {
+					throw new Error("Source changed during ZIP generation; retry on next scan");
+				}
+				await publishSpecialZip(zipResult.zipPath, zipPath, source);
 				const stats = await fs.stat(zipPath);
 				const size = humanFileSize(stats.size, true);
 				await this.updateSpecialDirectorySizeIfNeeded(file, size);
-				logger.info(`artifact-build:complete ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" elapsedMs="${Date.now() - start}".`);
+				logger.info(`artifact-build:complete ${itemProgress}reason="${reason}" coverId="${file.coverId}" kind="${file.fileKind}" size="${size}" elapsedMs="${Date.now() - start}".`);
 
 				return {
 					coverId: file.coverId,
 					status: "ready",
+					reason,
+					action: reason === "missing-zip" ? "created" : "rebuilt",
 					size,
 					zipPath,
 					elapsedMs: Date.now() - start
 				};
-			} catch (error) {
+			} finally {
 				await cleanupStagingDir(stagingDir);
-				throw error;
 			}
 		} catch (error) {
-			logger.error(`artifact-build:error ${itemProgress}coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}":`, error);
+			logger.error(`artifact-build:error ${itemProgress}reason="${reason}" coverId="${file.coverId}" kind="${file.fileKind}" path="${sourcePath}":`, error);
 			return {
 				coverId: file.coverId,
 				status: "error",
+				reason,
 				error: error instanceof Error ? error.message : String(error),
 				elapsedMs: Date.now() - start
 			};

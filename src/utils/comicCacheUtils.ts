@@ -325,6 +325,7 @@ export async function generateDirectoryZipArtifact(
 	cacheDir: string = getCacheDir(coverId),
 	options?: {
 		onProgress?: (progress: ZipArtifactProgress) => void | Promise<void>;
+		failOnWarning?: boolean;
 	}
 ): Promise<{ zipPath: string; sizeBytes: number }> {
 	const zipPath = getZipPath(coverId, cacheDir);
@@ -333,13 +334,22 @@ export async function generateDirectoryZipArtifact(
 	return new Promise((resolve, reject) => {
 		const output = fs.createWriteStream(zipPath);
 		const archive = archiver("zip", {store: true});
+		let failure: Error | undefined;
+		const abort = (error: Error): void => {
+			if (failure) return;
+			failure = error;
+			archive.abort();
+			output.destroy();
+		};
 
 		output.on("close", () => {
-			resolve({zipPath, sizeBytes: archive.pointer()});
+			if (failure) reject(failure);
+			else resolve({zipPath, sizeBytes: archive.pointer()});
 		});
 
-		output.on("error", reject);
-		archive.on("error", reject);
+		output.on("error", options?.failOnWarning ? abort : reject);
+		archive.on("error", options?.failOnWarning ? abort : reject);
+		if (options?.failOnWarning) archive.on("warning", abort);
 		archive.on("progress", (progress) => {
 			void options?.onProgress?.({
 				entriesProcessed: progress.entries.processed || 0,
@@ -351,7 +361,7 @@ export async function generateDirectoryZipArtifact(
 
 		archive.pipe(output);
 		archive.directory(directoryPath, false);
-		void archive.finalize();
+		void archive.finalize().catch(options?.failOnWarning ? abort : reject);
 	});
 }
 

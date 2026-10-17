@@ -130,8 +130,7 @@ describe("SpecialDirectoryArtifactService", () => {
 		const zipPath = getZipPath(coverId);
 		const previousBuffer = await fs.readFile(zipPath);
 
-		const validateSpy = jest.spyOn(comicCacheUtils, "validateZipArtifact")
-			.mockImplementation(async (candidatePath: string) => candidatePath !== zipPath);
+		await fs.writeFile(path.join(sourceDir, "track-02.mp3"), "new-track");
 		const generateSpy = jest.spyOn(comicCacheUtils, "generateDirectoryZipArtifact")
 			.mockRejectedValue(new Error("zip build failed"));
 
@@ -151,7 +150,6 @@ describe("SpecialDirectoryArtifactService", () => {
 
 		expect(result.status).toBe("error");
 		expect(generateSpy).toHaveBeenCalled();
-		expect(validateSpy).toHaveBeenCalled();
 		expect(afterBuffer.equals(previousBuffer)).toBe(true);
 	});
 
